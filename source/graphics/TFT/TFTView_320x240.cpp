@@ -3553,6 +3553,8 @@ uint32_t TFTView_320x240::language2val(meshtastic_Language lang)
     case meshtastic_Language_SIMPLIFIED_CHINESE:
         return 20;
     case meshtastic_Language_TRADITIONAL_CHINESE:
+        return 20; // no zh-TW translation yet - show Simplified Chinese entry
+    case meshtastic_Language_JAPANESE:
         return 21;
     default:
         ILOG_WARN("unknown language uiconfig: %d", lang);
@@ -3609,7 +3611,7 @@ meshtastic_Language TFTView_320x240::val2language(uint32_t val)
     case 20:
         return meshtastic_Language_SIMPLIFIED_CHINESE;
     case 21:
-        return meshtastic_Language_TRADITIONAL_CHINESE;
+        return meshtastic_Language_JAPANESE;
     default:
         ILOG_WARN("unknown language val: %d", val);
     }
@@ -3703,12 +3705,16 @@ void TFTView_320x240::setLocale(meshtastic_Language lang)
         locale = "da_DK.UTF-8";
         break;
     case meshtastic_Language_SIMPLIFIED_CHINESE:
-        lv_i18n_set_locale("cn");
+        lv_i18n_set_locale("zh-CN");
         locale = "zh_CN.UTF-8";
         break;
     case meshtastic_Language_TRADITIONAL_CHINESE:
-        lv_i18n_set_locale("tw");
+        lv_i18n_set_locale("zh-CN"); // no zh-TW translation yet
         locale = "zh_TW.UTF-8";
+        break;
+    case meshtastic_Language_JAPANESE:
+        lv_i18n_set_locale("ja");
+        locale = "ja_JP.UTF-8";
         break;
     default:
         ILOG_WARN("Language %d not implemented", lang);

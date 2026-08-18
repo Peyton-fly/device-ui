@@ -6,6 +6,7 @@
 #include "input/InputDriver.h"
 #include "lvgl_private.h"
 #include "util/ILog.h"
+#include "util/II2cLock.h"
 #include "util/ISpiLock.h"
 #include <functional>
 
@@ -247,7 +248,7 @@ template <class LGFX> void LGFXDriver<LGFX>::touchpad_read(lv_indev_t *indev_dri
     static uint32_t lastSlowWarnAt;
     static uint32_t maxPollElapsedMs;
     static bool reportedSlowPeriod;
-    const uint32_t readStartedAt = millis();
+    uint32_t readStartedAt = 0;
 #endif
 #ifdef CUSTOM_TOUCH_DRIVER
     bool touched = lgfx->getTouchXY(&touchX, &touchY); // I2C, no bus guard needed
@@ -256,6 +257,10 @@ template <class LGFX> void LGFXDriver<LGFX>::touchpad_read(lv_indev_t *indev_dri
     bool touched;
     {
         ISpiLock::Guard bus;
+        II2cLock::Guard i2cBus;
+#if defined(SEEED_WIO_TRACKER_L2)
+        readStartedAt = millis(); // after the guards: excludes lock-wait time
+#endif
         touched = lgfx->getTouch(&touchX, &touchY);
     }
 #endif
@@ -298,7 +303,11 @@ template <class LGFX> void LGFXDriver<LGFX>::touchpad_read(lv_indev_t *indev_dri
             if (lastOORWarnAt == 0 || now - lastOORWarnAt >= oorWarnIntervalMs) {
                 lastOORWarnAt = now;
                 lgfx::v1::touch_point_t rawTp;
-                const uint_fast8_t rawCount = lgfx->getTouchRaw(&rawTp, 1);
+                uint_fast8_t rawCount;
+                {
+                    II2cLock::Guard i2cBus;
+                    rawCount = lgfx->getTouchRaw(&rawTp, 1);
+                }
                 ILOG_WARN("L2 touch OOR: mapped=(%u,%u) raw=(%d,%d) rawSize=%u size=%ux%u mappedCount=%u", touchX,
                           touchY, rawTp.x, rawTp.y, rawTp.size, lgfx->width(), lgfx->height(), rawCount);
             }

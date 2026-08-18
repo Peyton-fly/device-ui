@@ -6873,6 +6873,23 @@ void TFTView_320x240::showMessages(uint32_t nodeNum)
     }
 }
 
+// L2 PATCH BEGIN: shared anim callbacks + panel design baseline (keyboard rapid-toggle drift fix)
+static void panel_anim_cb(void *var, int32_t v) { lv_obj_set_y((lv_obj_t *)var, v); }
+static void kbd_anim_cb(void *var, int32_t v)  { lv_obj_set_y((lv_obj_t *)var, v); }
+static int32_t panel_base_y()
+{
+    static int32_t baseY = 0;
+    static bool cached = false;
+    if (!cached) {
+        lv_area_t c;
+        lv_obj_get_coords(objects.messages_panel, &c);
+        baseY = c.y1;
+        cached = true;
+    }
+    return baseY;
+}
+// L2 PATCH END
+
 /**
  * @brief Place keyboard at a suitable space above or below the text input area
  *
@@ -6888,17 +6905,18 @@ void TFTView_320x240::showKeyboard(lv_obj_t *textArea)
 
     if (textArea == objects.message_input_area) {
         // if keyboard is to be shown in message input area then scroll the panel using animation
-        static auto panelAnimCB = [](void *var, int32_t v) { lv_obj_set_y((lv_obj_t *)var, v); };
-        static auto kbdAnimCB = [](void *var, int32_t v) { lv_obj_set_y((lv_obj_t *)var, v); };
-
+        // L2 PATCH: shared exec_cb + absolute end value (kill stale anims precisely, keep scroll anims)
         static lv_anim_t a1;
         lv_area_t panel_coords;
         lv_obj_get_coords(objects.messages_panel, &panel_coords);
 
+        lv_anim_del(objects.messages_panel, panel_anim_cb);
+        lv_anim_del(objects.keyboard, kbd_anim_cb);
+
         lv_anim_init(&a1);
         lv_anim_set_var(&a1, objects.messages_panel);
-        lv_anim_set_exec_cb(&a1, panelAnimCB);
-        lv_anim_set_values(&a1, panel_coords.y1, panel_coords.y1 - kb_h);
+        lv_anim_set_exec_cb(&a1, panel_anim_cb);
+        lv_anim_set_values(&a1, panel_coords.y1, panel_base_y() - kb_h);
         lv_anim_set_duration(&a1, 300);
         lv_anim_set_path_cb(&a1, lv_anim_path_linear);
         lv_anim_start(&a1);
@@ -6906,7 +6924,7 @@ void TFTView_320x240::showKeyboard(lv_obj_t *textArea)
         static lv_anim_t a2;
         lv_anim_init(&a2);
         lv_anim_set_var(&a2, objects.keyboard);
-        lv_anim_set_exec_cb(&a2, kbdAnimCB);
+        lv_anim_set_exec_cb(&a2, kbd_anim_cb);
         lv_anim_set_values(&a2, v, v - kb_h);
         lv_anim_set_duration(&a2, 300);
         lv_anim_set_path_cb(&a2, lv_anim_path_linear);
@@ -6928,36 +6946,25 @@ void TFTView_320x240::showKeyboard(lv_obj_t *textArea)
 
 void TFTView_320x240::hideKeyboard(lv_obj_t *panel)
 {
-    lv_area_t kb_coords;
-    lv_obj_get_coords(objects.keyboard, &kb_coords);
-    uint32_t kb_h = kb_coords.y2 - kb_coords.y1;
-
     if (panel == objects.messages_panel) {
-        static auto panelAnimCB = [](void *var, int32_t v) { lv_obj_set_y((lv_obj_t *)var, v); };
-        static auto kbdAnimCB = [](void *var, int32_t v) { lv_obj_set_y((lv_obj_t *)var, v); };
-        static auto deleted_cb = [](_lv_anim_t *) { lv_obj_add_flag(objects.keyboard, LV_OBJ_FLAG_HIDDEN); };
+        // L2 PATCH: hide immediately so the HIDDEN-flag toggle check stays consistent
+        // even while a previous animation is still running; absolute end value
+        lv_obj_add_flag(objects.keyboard, LV_OBJ_FLAG_HIDDEN);
 
         static lv_anim_t a1;
         lv_area_t panel_coords;
         lv_obj_get_coords(panel, &panel_coords);
 
+        lv_anim_del(panel, panel_anim_cb);
+        lv_anim_del(objects.keyboard, kbd_anim_cb);
+
         lv_anim_init(&a1);
         lv_anim_set_var(&a1, panel);
-        lv_anim_set_exec_cb(&a1, panelAnimCB);
-        lv_anim_set_values(&a1, panel_coords.y1, panel_coords.y1 + kb_h);
+        lv_anim_set_exec_cb(&a1, panel_anim_cb);
+        lv_anim_set_values(&a1, panel_coords.y1, panel_base_y());
         lv_anim_set_duration(&a1, 300);
         lv_anim_set_path_cb(&a1, lv_anim_path_linear);
         lv_anim_start(&a1);
-
-        static lv_anim_t a2;
-        lv_anim_init(&a2);
-        lv_anim_set_var(&a2, objects.keyboard);
-        lv_anim_set_exec_cb(&a2, kbdAnimCB);
-        lv_anim_set_values(&a2, kb_coords.y1, kb_coords.y1 + kb_h);
-        lv_anim_set_duration(&a2, 300);
-        lv_anim_set_path_cb(&a2, lv_anim_path_linear);
-        lv_anim_set_deleted_cb(&a2, deleted_cb);
-        lv_anim_start(&a2);
     }
 }
 

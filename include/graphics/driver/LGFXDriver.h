@@ -237,6 +237,18 @@ template <class LGFX> void LGFXDriver<LGFX>::rounder_cb(lv_event_t *e)
 template <class LGFX> void LGFXDriver<LGFX>::touchpad_read(lv_indev_t *indev_driver, lv_indev_data_t *data)
 {
     uint16_t touchX = 0, touchY = 0;
+#if defined(SEEED_WIO_TRACKER_L2)
+    static constexpr uint32_t slowReadThresholdMs = 20;
+    static constexpr uint32_t warnIntervalMs = 60000;
+    static uint32_t totalPolls;
+    static uint32_t slowPolls;
+    static uint32_t consecutiveSlowPolls;
+    static uint32_t firstSlowPollAt;
+    static uint32_t lastSlowWarnAt;
+    static uint32_t maxPollElapsedMs;
+    static bool reportedSlowPeriod;
+    const uint32_t readStartedAt = millis();
+#endif
 #ifdef CUSTOM_TOUCH_DRIVER
     bool touched = lgfx->getTouchXY(&touchX, &touchY); // I2C, no bus guard needed
 #else
@@ -247,14 +259,63 @@ template <class LGFX> void LGFXDriver<LGFX>::touchpad_read(lv_indev_t *indev_dri
         touched = lgfx->getTouch(&touchX, &touchY);
     }
 #endif
+#if defined(SEEED_WIO_TRACKER_L2)
+    const uint32_t readElapsedMs = millis() - readStartedAt;
+    totalPolls++;
+    if (readElapsedMs > maxPollElapsedMs)
+        maxPollElapsedMs = readElapsedMs;
+
+    if (readElapsedMs > slowReadThresholdMs) {
+        slowPolls++;
+        if (consecutiveSlowPolls++ == 0)
+            firstSlowPollAt = readStartedAt;
+        if (lastSlowWarnAt == 0 || millis() - lastSlowWarnAt >= warnIntervalMs) {
+            lastSlowWarnAt = millis();
+            reportedSlowPeriod = true;
+            ILOG_WARN("[L2 TOUCH] slow GT911 poll: elapsed=%lums consecutive=%lu slow=%lu/%lu touched=%d", readElapsedMs,
+                      consecutiveSlowPolls, slowPolls, totalPolls, touched);
+        }
+    } else if (consecutiveSlowPolls != 0) {
+        if (reportedSlowPeriod) {
+            ILOG_INFO("[L2 TOUCH] GT911 polling recovered: consecutive=%lu stalledFor=%lums max=%lums",
+                      consecutiveSlowPolls, readStartedAt - firstSlowPollAt, maxPollElapsedMs);
+        }
+        consecutiveSlowPolls = 0;
+        maxPollElapsedMs = 0;
+        reportedSlowPeriod = false;
+    }
+#endif
     if (!touched) {
         data->state = LV_INDEV_STATE_REL;
     } else {
+#if defined(SEEED_WIO_TRACKER_L2)
+        // L2 temporary fix: when GT911 calibration breaks / I2C tears, mapped coords go out of range -> treat as untouched,
+        // otherwise LVGL warn storms drag the UI to ~1fps
+        if (touchX >= lgfx->width() || touchY >= lgfx->height()) {
+            static constexpr uint32_t oorWarnIntervalMs = 1000;
+            static uint32_t lastOORWarnAt;
+            const uint32_t now = millis();
+            if (lastOORWarnAt == 0 || now - lastOORWarnAt >= oorWarnIntervalMs) {
+                lastOORWarnAt = now;
+                lgfx::v1::touch_point_t rawTp;
+                const uint_fast8_t rawCount = lgfx->getTouchRaw(&rawTp, 1);
+                ILOG_WARN("L2 touch OOR: mapped=(%u,%u) raw=(%d,%d) rawSize=%u size=%ux%u mappedCount=%u", touchX,
+                          touchY, rawTp.x, rawTp.y, rawTp.size, lgfx->width(), lgfx->height(), rawCount);
+            }
+            data->state = LV_INDEV_STATE_REL;
+        } else {
+            data->state = LV_INDEV_STATE_PR;
+            data->point.x = touchX;
+            data->point.y = touchY;
+            // ILOG_DEBUG("Touch(%hd/%hd)", touchX, touchY);
+        }
+#else
         data->state = LV_INDEV_STATE_PR;
         data->point.x = touchX;
         data->point.y = touchY;
 
         // ILOG_DEBUG("Touch(%hd/%hd)", touchX, touchY);
+#endif
     }
 }
 

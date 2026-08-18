@@ -3,6 +3,8 @@
 
 #define LGFX_USE_V1
 #include "Wire.h"
+#include "soc/i2c_struct.h"
+#include "util/II2cLock.h"
 #include "util/ILog.h"
 #include <LovyanGFX.hpp>
 
@@ -12,6 +14,16 @@
 
 #define LP5814_I2C_ADDR_DEFAULT 0x2c
 #define TCA9535_I2C_ADDR_DEFAULT 0x21
+
+// L2-I2C-GLITCH-SYNC: copy of applyI2CGlitchFilter() in firmware
+// src/graphics/TFTDisplay.cpp; keep both in sync.
+static void applyI2CGlitchFilter()
+{
+    I2C0.filter_cfg.scl_filter_thres = 7;
+    I2C0.filter_cfg.sda_filter_thres = 7;
+    I2C0.filter_cfg.scl_filter_en = 1;
+    I2C0.filter_cfg.sda_filter_en = 1;
+}
 
 class Wio_Tracker_Light : public lgfx::v1::ILight
 {
@@ -76,10 +88,14 @@ class Wio_Tracker_Light : public lgfx::v1::ILight
   private:
     void writeReg(uint8_t reg, uint8_t value)
     {
-        Wire.beginTransmission(LP5814_I2C_ADDR_DEFAULT);
-        Wire.write(reg);
-        Wire.write(value);
-        uint8_t error = Wire.endTransmission();
+        uint8_t error;
+        {
+            II2cLock::Guard guard;
+            Wire.beginTransmission(LP5814_I2C_ADDR_DEFAULT);
+            Wire.write(reg);
+            Wire.write(value);
+            error = Wire.endTransmission();
+        }
         if (error != 0)
             ILOG_ERROR("LP5814 write reg 0x%02x failed: %d", reg, error);
     }
@@ -102,6 +118,11 @@ class LGFX_WIO_TRACKER_L2 : public lgfx::LGFX_Device
 
     bool init_impl(bool use_reset, bool use_clear) override
     {
+        // One-shot boot critical section: LP5814 init, GT911 init, and the
+        // Wire reset below all reconfigure the shared bus (boot-time
+        // exemption, see util/II2cLock.h).
+        II2cLock::Guard guard;
+
         // Initialize LP5814 before GT911 touch driver runs (bus is clean here).
         _light_instance.init(_light_instance.config().brightness);
 
@@ -113,6 +134,8 @@ class LGFX_WIO_TRACKER_L2 : public lgfx::LGFX_Device
         // called by init_lgfx() immediately after us doesn't timeout.
         Wire.end();
         Wire.begin(47, 48);
+        Wire.setClock(100000);
+        applyI2CGlitchFilter();
 
         return result;
     }

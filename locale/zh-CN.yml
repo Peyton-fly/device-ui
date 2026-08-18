@@ -1,4 +1,5 @@
 zh-CN:
+  Reboot into BaseUI?: 重启进入 BaseUI？
   no new messages: 暂无新消息
   1 of 1 nodes online: 1/1 个节点在线
   DEL: 删除
@@ -37,6 +38,7 @@ zh-CN:
   Unknown: 未知
   Offline: 离线
   Public Key: 公钥
+  Channel: 信道
   Hops away: 跳数
   MQTT: MQTT
   Position: 位置
@@ -66,6 +68,9 @@ zh-CN:
   Packet Statistics: 数据包统计
   "LONG FAST\nLONG SLOW\n-- deprecated --\nMEDIUM SLOW\nMEDIUM FAST\nSHORT SLOW\nSHORT FAST\nLONG MODERATE\nSHORT TURBO": "远距快速\n远距慢速\n-- 已弃用 --\n中距慢速\n中距快速\n近距慢速\n近距快速\n远距适中\n近距极速"
   "Client\nClient Mute\nRouter\n-- deprecated --\nRepeater\nTracker\nSensor\nTAK\nClient Hidden\nLost & Found\nTAK Tracker": "客户端\n静音客户端\n路由器\n-- 已弃用 --\n中继器\n追踪器\n传感器\nTAK\n隐藏客户端\n失物招领\nTAK追踪器"
+  "LONG FAST\nLONG MODERATE\nLONG TURBO\nMEDIUM FAST\nMEDIUM SLOW\nSHORT FAST\nSHORT TURBO\nSHORT SLOW": "远距快速\n远距适中\n远距极速\n中距快速\n中距慢速\n近距快速\n近距极速\n近距慢速"
+  "Client\nClient Mute\nRouter\nRepeater\nTracker\nSensor\nTAK\nClient Hidden\nLost & Found\nTAK Tracker\nRouter Late": "客户端\n静音客户端\n路由器\n中继器\n追踪器\n传感器\nTAK\n隐藏客户端\n失物招领\nTAK追踪器\n延迟路由器"
+  "Client\nClient Mute\nTracker\nSensor\nTAK\nClient Hidden\nLost & Found\nTAK Tracker": "客户端\n静音客户端\n追踪器\n传感器\nTAK\n隐藏客户端\n失物招领\nTAK追踪器"
   "Dark\nLight": "深色\n浅色"
   none: 无
   Default: 默认
@@ -91,13 +96,41 @@ zh-CN:
   'hops: %d': '跳数：%d'
   unknown: 未知
   '<no name>': '<无名称>'
-  '%d active chat(s)': '%d 个活跃聊天'
+  '%d active chat(s)':
+    other: '%d 个活跃聊天'
+  "New Message from\n": "新消息来自\n"
   "New message from \n%s": "新消息来自：\n%s"
   'Input Control: %s/%s': '输入控制：%s/%s'
-  '%d of %d nodes online': '%d/%d 个节点在线'
+  '%d of %d nodes online':
+    other: '%d/%d 个节点在线'
   Filtering ...: 正在过滤...
   'Filter: %d of %d nodes': '过滤：%d/%d 个节点'
   now: 现在
+  Please set region and name: 请设置区域和名称
+  Region: 区域
+  done: 完成
+  default: 默认
+  'Screen Calibration: %s': '屏幕校准：%s'
+  '>> Programming mode <<': '>> 编程模式 <<'
+  'Language: %s': '语言：%s'
+  'Region: %s': '区域：%s'
+  'User name: %s': '用户名：%s'
+  'Device Role: %s': '设备角色：%s'
+  'Modem Preset: %s': '调制解调器预设：%s'
+  'Modem Preset: custom': '调制解调器预设：自定义'
+  Connected!: 已连接！
+  Disconnected!: 已断开！
+  'Channel: %s': '信道：%s'
+  Failed to write keys!: 写入密钥失败！
+  Failed to restore keys!: 恢复密钥失败！
+  Failed to parse keys!: 解析密钥失败！
+  Failed to retrieve keys!: 获取密钥失败！
+  "%s: %d GB (%s)\nUsed: %0.2f GB (%d%%)": "%s：%d GB (%s)\n已用：%0.2f GB (%d%%)"
+  SD slot empty: SD卡槽为空
+  SD invalid format: SD卡格式无效
+  SD mbr not found: 未找到SD卡MBR
+  SD card error: SD卡错误
+  SD unknown error: SD卡未知错误
   '%d new message': '%d 条新消息'
   '%d new messages': '%d 条新消息'
   'uptime: %02d:%02d:%02d': '运行时间：%02d:%02d:%02d'
@@ -113,6 +146,13 @@ zh-CN:
   Shutting down ...: 正在关机...
   LoRa 0.0 MHz: LoRa 0.0 MHz
   silent: 静音
+  no SD card detected: 未检测到SD卡
+  map tiles not found!: 未找到地图瓦片！
+  Backup & Restore: 备份与恢复
+  Backup: 备份
+  Restore: 恢复
+  Public/Private Key: 公钥/私钥
+  "NodeDB Reset\nFactory Reset\nClear Chat History": "节点数据库重置\n恢复出厂设置\n清除聊天记录"
   'WiFi: <not setup>': 'WiFi：<未设置>'
   LoRa TX off!: LoRa发送已关闭！
   WiFi SSID: WiFi名称
@@ -130,4 +170,8 @@ zh-CN:
   Enter Filter ...: 输入过滤条件...
   region unset: 区域未设置
   no signal: 无信号
-  Restoring messages ...: ~
+  Restoring messages ...: 正在恢复消息...
+  'Used: ...': '已用：...'
+  SD ejected: SD卡已弹出
+  'No map tiles found on SDCard!': 未找到地图瓦片！
+  no public key: 无公钥

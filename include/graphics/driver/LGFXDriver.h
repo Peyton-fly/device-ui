@@ -293,38 +293,11 @@ template <class LGFX> void LGFXDriver<LGFX>::touchpad_read(lv_indev_t *indev_dri
     if (!touched) {
         data->state = LV_INDEV_STATE_REL;
     } else {
-#if defined(SEEED_WIO_TRACKER_L2)
-        // L2 temporary fix: when GT911 calibration breaks / I2C tears, mapped coords go out of range -> treat as untouched,
-        // otherwise LVGL warn storms drag the UI to ~1fps
-        if (touchX >= lgfx->width() || touchY >= lgfx->height()) {
-            static constexpr uint32_t oorWarnIntervalMs = 1000;
-            static uint32_t lastOORWarnAt;
-            const uint32_t now = millis();
-            if (lastOORWarnAt == 0 || now - lastOORWarnAt >= oorWarnIntervalMs) {
-                lastOORWarnAt = now;
-                lgfx::v1::touch_point_t rawTp;
-                uint_fast8_t rawCount;
-                {
-                    II2cLock::Guard i2cBus;
-                    rawCount = lgfx->getTouchRaw(&rawTp, 1);
-                }
-                ILOG_WARN("L2 touch OOR: mapped=(%u,%u) raw=(%d,%d) rawSize=%u size=%ux%u mappedCount=%u", touchX,
-                          touchY, rawTp.x, rawTp.y, rawTp.size, lgfx->width(), lgfx->height(), rawCount);
-            }
-            data->state = LV_INDEV_STATE_REL;
-        } else {
-            data->state = LV_INDEV_STATE_PR;
-            data->point.x = touchX;
-            data->point.y = touchY;
-            // ILOG_DEBUG("Touch(%hd/%hd)", touchX, touchY);
-        }
-#else
         data->state = LV_INDEV_STATE_PR;
         data->point.x = touchX;
         data->point.y = touchY;
 
         // ILOG_DEBUG("Touch(%hd/%hd)", touchX, touchY);
-#endif
     }
 }
 
@@ -482,6 +455,16 @@ template <class LGFX> void LGFXDriver<LGFX>::init_lgfx(void)
 template <class LGFX> bool LGFXDriver<LGFX>::calibrate(uint16_t parameters[8])
 {
 #ifndef CUSTOM_TOUCH_DRIVER
+#if defined(SEEED_WIO_TRACKER_L2)
+    // GT911 capacitive touch is factory-calibrated; interactive calibration produced
+    // broken affine matrices (wild taps) that persisted across boots. Pin L2 to the
+    // fixed identity mapping (raw 240x320 + offset_rotation=2 -> 320x240 landscape).
+    ILOG_INFO("L2 touch calibration pinned to factory 320x240 mapping");
+    const uint16_t fixed[8] = {0, 0, 0, 319, 239, 0, 239, 319};
+    for (int i = 0; i < 8; ++i)
+        parameters[i] = fixed[i];
+    lgfx->setTouchCalibrate(parameters);
+#else
     if (parameters[0] || parameters[7]) {
         ILOG_DEBUG("setting touch screen calibration data");
         lgfx->setTouchCalibrate(parameters);
@@ -512,6 +495,7 @@ template <class LGFX> bool LGFXDriver<LGFX>::calibrate(uint16_t parameters[8])
     }
     ILOG_DEBUG("Touchscreen calibration parameters: {%d, %d, %d, %d, %d, %d, %d, %d}", parameters[0], parameters[1],
                parameters[2], parameters[3], parameters[4], parameters[5], parameters[6], parameters[7]);
+#endif
 #endif
     return true;
 }

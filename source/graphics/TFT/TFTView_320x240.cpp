@@ -1408,6 +1408,7 @@ void TFTView_320x240::ui_event_BellButton(lv_event_t *e)
         }
         THIS->setBellText(THIS->db.uiConfig.alert_enabled, !THIS->db.silent);
         THIS->controller->storeUIConfig(THIS->db.uiConfig);
+        THIS->controller->requestRingtone();
     } else if (event_code == LV_EVENT_LONG_PRESSED) {
         ignoreClicked = true;
         if ((bool)objects.home_bell_button->user_data) {
@@ -1426,6 +1427,7 @@ void TFTView_320x240::ui_event_BellButton(lv_event_t *e)
         }
         THIS->setBellText(THIS->db.uiConfig.alert_enabled, !THIS->db.silent);
         THIS->controller->storeUIConfig(THIS->db.uiConfig);
+        THIS->controller->requestRingtone();
     }
 }
 
@@ -6409,6 +6411,13 @@ void TFTView_320x240::updateRingtone(const char rtttl[231])
         db.uiConfig.ring_tone_id = rtIndex;
     if (db.uiConfig.ring_tone_id == 0)
         db.uiConfig.ring_tone_id = 1;
+
+    // reconcile firmware-stored ringtone with sound intent
+    bool fwSilent = (rtttl[0] == '\0' || strncmp(rtttl, ringtone[0].rtttl, 7) == 0);
+    if (db.silent != fwSilent) {
+        ILOG_WARN("ringtone divergence: silent=%d fw=%.16s -> resync", db.silent, rtttl);
+        controller->sendConfig(ringtone[db.silent ? 0 : db.uiConfig.ring_tone_id].rtttl, ownNode);
+    }
 
     // update home panel bell text
     setBellText(db.uiConfig.alert_enabled, !db.silent);

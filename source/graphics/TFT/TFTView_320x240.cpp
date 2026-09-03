@@ -6557,7 +6557,7 @@ void TFTView_320x240::newMessage(uint32_t from, uint32_t to, uint8_t ch, const c
             }
             lv_obj_add_flag(container, LV_OBJ_FLAG_HIDDEN);
         }
-        if (container != activeMsgContainer)
+        if (container != activeMsgContainer || activePanel != objects.messages_panel)
             highlightChat(from, to, ch);
     } else {
         if (container != activeMsgContainer)
@@ -6860,6 +6860,9 @@ void TFTView_320x240::showMessages(uint8_t ch)
     lv_obj_clear_flag(activeMsgContainer, LV_OBJ_FLAG_HIDDEN);
     lv_label_set_text(objects.top_group_chat_label, lv_label_get_text(channel[ch]));
     clearUnread(ch);
+    auto it = chats.find(ch);
+    if (it != chats.end())
+        lv_obj_set_style_border_color(it->second, colorMidGray, LV_PART_MAIN | LV_STATE_DEFAULT);
     ui_set_active(objects.messages_button, objects.messages_panel, objects.top_group_chat_panel);
 }
 
@@ -6878,6 +6881,9 @@ void TFTView_320x240::showMessages(uint32_t nodeNum)
     activeMsgContainer->user_data = (void *)nodeNum;
     lv_obj_clear_flag(activeMsgContainer, LV_OBJ_FLAG_HIDDEN);
     clearUnread(nodeNum);
+    auto it = chats.find(nodeNum);
+    if (it != chats.end())
+        lv_obj_set_style_border_color(it->second, colorMidGray, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_t *p = nodes[nodeNum];
     if (p) {
         lv_label_set_text(objects.top_messages_node_label, lv_label_get_text(p->LV_OBJ_IDX(node_lbl_idx)));

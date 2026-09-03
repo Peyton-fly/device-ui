@@ -486,8 +486,6 @@ void TFTView_320x240::ui_set_active(lv_obj_t *b, lv_obj_t *p, lv_obj_t *tp)
                     activeMsgContainer = objects.messages_container;
                 }
             }
-            unreadMessages = 0; // TODO: not all messages may be actually read
-            updateUnreadMessages();
         } else if (activePanel == objects.node_options_panel) {
             // we're moving away from node options panel, so save latest settings
             storeNodeOptions();
@@ -3821,6 +3819,7 @@ void TFTView_320x240::eraseChat(uint32_t channelOrNode)
         ILOG_WARN("eraseChat: channelOrNode %d not found", channelOrNode);
         return;
     }
+    clearUnread(channelOrNode);
     if (channelOrNode < c_max_channels) {
         uint8_t ch = (uint8_t)channelOrNode;
         if (state == MeshtasticView::eRunning) {
@@ -3863,6 +3862,9 @@ void TFTView_320x240::clearChatHistory(void)
     }
     chats.clear();
     messages.clear();
+    unreadByChat.clear();
+    unreadMessages = 0;
+    updateUnreadMessages();
     updateActiveChats();
     updateNodesFiltered(true);
     controller->removeTextMessages(0, 0, 0);
@@ -6545,6 +6547,8 @@ void TFTView_320x240::newMessage(uint32_t from, uint32_t to, uint8_t ch, const c
     if (!restore) {
         // display msg popup if not already viewing the messages
         if (container != activeMsgContainer || activePanel != objects.messages_panel) {
+            uint32_t key = (to == UINT32_MAX || from == 0) ? ch : from;
+            unreadByChat[key]++;
             unreadMessages++;
             updateUnreadMessages();
             if (activePanel != objects.messages_panel && db.uiConfig.alert_enabled &&
@@ -6855,6 +6859,7 @@ void TFTView_320x240::showMessages(uint8_t ch)
     activeMsgContainer->user_data = (void *)(uint32_t)ch;
     lv_obj_clear_flag(activeMsgContainer, LV_OBJ_FLAG_HIDDEN);
     lv_label_set_text(objects.top_group_chat_label, lv_label_get_text(channel[ch]));
+    clearUnread(ch);
     ui_set_active(objects.messages_button, objects.messages_panel, objects.top_group_chat_panel);
 }
 
@@ -6872,6 +6877,7 @@ void TFTView_320x240::showMessages(uint32_t nodeNum)
     }
     activeMsgContainer->user_data = (void *)nodeNum;
     lv_obj_clear_flag(activeMsgContainer, LV_OBJ_FLAG_HIDDEN);
+    clearUnread(nodeNum);
     lv_obj_t *p = nodes[nodeNum];
     if (p) {
         lv_label_set_text(objects.top_messages_node_label, lv_label_get_text(p->LV_OBJ_IDX(node_lbl_idx)));
@@ -6890,8 +6896,6 @@ void TFTView_320x240::showMessages(uint32_t nodeNum)
                                           LV_PART_MAIN | LV_STATE_DEFAULT);
             break;
         }
-        unreadMessages = 0; // TODO: not all messages may be actually read
-        updateUnreadMessages();
     } else {
         // TODO: log error
     }
@@ -7259,6 +7263,17 @@ void TFTView_320x240::updateAllLastHeard(void)
     nodesOnline = online;
     updateNodesFiltered(true);
     updateNodesStatus();
+}
+
+void TFTView_320x240::clearUnread(uint32_t channelOrNode)
+{
+    if (unreadByChat.erase(channelOrNode) == 0)
+        return;
+    uint32_t total = 0;
+    for (auto &u : unreadByChat)
+        total += u.second;
+    unreadMessages = total;
+    updateUnreadMessages();
 }
 
 void TFTView_320x240::updateUnreadMessages(void)

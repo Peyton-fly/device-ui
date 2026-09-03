@@ -180,6 +180,8 @@ class TFTView_320x240 : public MeshtasticView
     virtual void updateAllLastHeard(void);
     // update image and unread messages on home screen
     virtual void updateUnreadMessages(void);
+    // clear unread count of a single chat and refresh the home screen total
+    void clearUnread(uint32_t channelOrNode);
     // update time display on home screen
     virtual void updateTime(void);
     // update SD card slot info
@@ -400,6 +402,8 @@ class TFTView_320x240 : public MeshtasticView
     lv_obj_t *activePanel = nullptr;
     lv_obj_t *activeTopPanel = nullptr;
     lv_obj_t *activeMsgContainer = nullptr;
+    // per-chat unread counts; key < c_max_channels means channel index, else node number
+    std::unordered_map<uint32_t, uint32_t> unreadByChat;
     lv_obj_t *activeWidget = nullptr;
     lv_obj_t *activeTextInput = nullptr;
     lv_group_t *input_group = nullptr;

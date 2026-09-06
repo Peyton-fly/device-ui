@@ -598,6 +598,16 @@ void tick_screen(int screen_index);
 
 void create_screens();
 
+// Groups
+
+typedef struct _groups_t {
+    lv_group_t *mainButtons;
+} groups_t;
+
+extern groups_t groups;
+
+void ui_create_groups();
+
 #ifdef __cplusplus
 }
 #endif

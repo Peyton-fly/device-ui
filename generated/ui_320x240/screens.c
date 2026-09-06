@@ -6803,13 +6803,32 @@ uint32_t active_theme_index = 0;
 //
 //
 
+// Groups
+//
+
+groups_t groups;
+static bool groups_created = false;
+void ui_create_groups() {
+    if (!groups_created) {
+        groups.mainButtons = lv_group_create();
+        groups_created = true;
+    }
+}
+
+//
+//
+//
+
 void create_screens() {
 
 // Set default LVGL theme
     lv_display_t *dispp = lv_display_get_default();
     lv_theme_t *theme = lv_theme_default_init(dispp, lv_palette_main(LV_PALETTE_BLUE), lv_palette_main(LV_PALETTE_RED), false, LV_FONT_DEFAULT);
     lv_display_set_theme(dispp, theme);
-    
+
+    // Initialize groups
+    ui_create_groups();
+
     // Initialize screens
     // Create screens
     create_screen_boot_screen();

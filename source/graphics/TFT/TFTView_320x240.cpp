@@ -4125,9 +4125,19 @@ void TFTView_320x240::ui_event_ok(lv_event_t *e)
                 THIS->controller->sendConfig(meshtastic_Config_NetworkConfig{THIS->db.config.network}, THIS->ownNode);
                 THIS->notifyReboot(true);
             }
-            THIS->enablePanel(objects.home_panel);
+            // X2-FIX-WIFI (dual-path): this dialog opens either from the Settings
+            // list (disables controller_panel + tab_page_basic_settings — both are
+            // re-enabled by the unconditional tail after the switch) or from a
+            // long-press on the Home WLAN button (disables home_panel — nothing
+            // else ever re-enables it). Restore the Home origin only when that is
+            // where we came from; always focus back to the origin's button.
+            if (lv_obj_has_state(objects.home_panel, LV_STATE_DISABLED)) {
+                THIS->enablePanel(objects.home_panel);
+                lv_group_focus_obj(objects.home_wlan_button);
+            } else {
+                lv_group_focus_obj(objects.basic_settings_wifi_button);
+            }
             lv_obj_add_flag(objects.settings_wifi_panel, LV_OBJ_FLAG_HIDDEN);
-            lv_group_focus_obj(objects.basic_settings_wifi_button);
             break;
         }
         case eLanguage: {
@@ -4411,9 +4421,18 @@ void TFTView_320x240::ui_event_cancel(lv_event_t *e)
             break;
         }
         case TFTView_320x240::eWifi: {
+            // X2-FIX-WIFI (dual-path): mirror the ok-path fix — re-enable and
+            // focus the Home origin only when the dialog was opened from the
+            // Home WLAN long-press (home_panel disabled at that point); the
+            // Settings-list origin returns focus to the wifi button. The tail
+            // after the switch re-enables the Settings panels either way.
+            if (lv_obj_has_state(objects.home_panel, LV_STATE_DISABLED)) {
+                THIS->enablePanel(objects.home_panel);
+                lv_group_focus_obj(objects.home_wlan_button);
+            } else {
+                lv_group_focus_obj(objects.basic_settings_wifi_button);
+            }
             lv_obj_add_flag(objects.settings_wifi_panel, LV_OBJ_FLAG_HIDDEN);
-            THIS->enablePanel(objects.home_panel);
-            lv_group_focus_obj(objects.home_wlan_button);
             break;
         }
         case TFTView_320x240::eLanguage: {

@@ -596,6 +596,39 @@ static void addKeyBubbleFlags(lv_obj_t *parent)
         addKeyBubbleFlags(child);
     }
 }
+
+/**
+ * @brief keypad focus ring: 3 px Material-blue outline on LV_STATE_FOCUS_KEY
+ *
+ * The 425 lineage's generated styles.c registered focus styles (outline or
+ * border in 0x2196f3) on every focusable widget; the regenerated styles.c of
+ * this lineage dropped them all, so keypad focus was invisible. One shared
+ * runtime style restores the ring - it only renders on the focused object,
+ * so applying it to non-focusable widgets is inert.
+ */
+static lv_style_t style_key_focus;
+static bool style_key_focus_ready = false;
+
+static void applyKeyFocusStyle(lv_obj_t *obj)
+{
+    if (!style_key_focus_ready) {
+        lv_style_init(&style_key_focus);
+        lv_style_set_outline_width(&style_key_focus, 3);
+        lv_style_set_outline_color(&style_key_focus, lv_color_hex(0x2196f3));
+        lv_style_set_outline_opa(&style_key_focus, 180);
+        style_key_focus_ready = true;
+    }
+    lv_obj_add_style(obj, &style_key_focus, LV_PART_MAIN | LV_STATE_FOCUS_KEY);
+}
+
+static void addKeyFocusStyles(lv_obj_t *parent)
+{
+    for (uint32_t i = 0; i < lv_obj_get_child_count(parent); i++) {
+        lv_obj_t *child = lv_obj_get_child(parent, i);
+        applyKeyFocusStyle(child);
+        addKeyFocusStyles(child);
+    }
+}
 #endif // SEEED_MESHPAGER_X2
 
 /**
@@ -668,6 +701,13 @@ void TFTView_320x240::apply_hotfix(void)
     addKeyBubbleFlags(objects.blank_screen);
     addKeyBubbleFlags(objects.lock_screen);
     addKeyBubbleFlags(objects.calibration_screen);
+
+    // restore the keypad focus ring the regenerated styles of this lineage lost
+    addKeyFocusStyles(objects.main_screen);
+    addKeyFocusStyles(objects.boot_screen);
+    addKeyFocusStyles(objects.blank_screen);
+    addKeyFocusStyles(objects.lock_screen);
+    addKeyFocusStyles(objects.calibration_screen);
 #endif
 
     // adapt screens to custom display resolution
@@ -4967,6 +5007,7 @@ void TFTView_320x240::addMessage(lv_obj_t *container, uint32_t msgTime, uint32_t
     lv_obj_set_align(hiddenPanel, LV_ALIGN_CENTER);
 #if defined(SEEED_MESHPAGER_X2)
     lv_obj_add_flag(hiddenPanel, LV_OBJ_FLAG_EVENT_BUBBLE);
+    applyKeyFocusStyle(hiddenPanel);
 #endif
     lv_obj_clear_flag(hiddenPanel, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_radius(hiddenPanel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -4999,6 +5040,7 @@ void TFTView_320x240::addMessage(lv_obj_t *container, uint32_t msgTime, uint32_t
     // make the message bubble focusable and chain key events upward
     lv_obj_add_flag(textLabel, lv_obj_flag_t(LV_OBJ_FLAG_EVENT_BUBBLE | LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CLICK_FOCUSABLE |
                                              LV_OBJ_FLAG_SCROLL_ON_FOCUS));
+    applyKeyFocusStyle(textLabel);
 #endif
     lv_label_set_text(textLabel, buf);
 
@@ -5062,6 +5104,7 @@ void TFTView_320x240::addNode(uint32_t nodeNum, uint8_t ch, const char *userShor
     lv_obj_set_align(p, LV_ALIGN_CENTER);
 #if defined(SEEED_MESHPAGER_X2)
     lv_obj_add_flag(p, LV_OBJ_FLAG_EVENT_BUBBLE);
+    applyKeyFocusStyle(p);
 #endif
     lv_obj_set_style_pad_top(p, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_bottom(p, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -5098,6 +5141,7 @@ void TFTView_320x240::addNode(uint32_t nodeNum, uint8_t ch, const char *userShor
     lv_obj_add_flag(nodeButton, LV_OBJ_FLAG_SCROLL_ON_FOCUS);
 #if defined(SEEED_MESHPAGER_X2)
     lv_obj_add_flag(nodeButton, LV_OBJ_FLAG_EVENT_BUBBLE);
+    applyKeyFocusStyle(nodeButton);
 #endif
     lv_obj_set_style_shadow_width(nodeButton, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_max_height(nodeButton, 132, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -6896,6 +6940,7 @@ lv_obj_t *TFTView_320x240::newMessageContainer(uint32_t from, uint32_t to, uint8
     lv_obj_set_flex_align(container, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
 #if defined(SEEED_MESHPAGER_X2)
     lv_obj_add_flag(container, LV_OBJ_FLAG_EVENT_BUBBLE);
+    applyKeyFocusStyle(container);
 #endif
     lv_obj_clear_flag(container, lv_obj_flag_t(LV_OBJ_FLAG_PRESS_LOCK | LV_OBJ_FLAG_CLICK_FOCUSABLE | LV_OBJ_FLAG_GESTURE_BUBBLE |
                                                LV_OBJ_FLAG_SNAPPABLE | LV_OBJ_FLAG_SCROLL_ELASTIC)); /// Flags
@@ -7007,6 +7052,7 @@ void TFTView_320x240::newMessage(uint32_t nodeNum, lv_obj_t *container, uint8_t 
     lv_obj_set_align(hiddenPanel, LV_ALIGN_CENTER);
 #if defined(SEEED_MESHPAGER_X2)
     lv_obj_add_flag(hiddenPanel, LV_OBJ_FLAG_EVENT_BUBBLE);
+    applyKeyFocusStyle(hiddenPanel);
 #endif
     lv_obj_clear_flag(hiddenPanel, LV_OBJ_FLAG_SCROLLABLE); /// Flags
     lv_obj_set_style_radius(hiddenPanel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -7030,6 +7076,7 @@ void TFTView_320x240::newMessage(uint32_t nodeNum, lv_obj_t *container, uint8_t 
     lv_obj_add_flag(msgLabel, LV_OBJ_FLAG_CLICK_FOCUSABLE);
 #if defined(SEEED_MESHPAGER_X2)
     lv_obj_add_flag(msgLabel, lv_obj_flag_t(LV_OBJ_FLAG_EVENT_BUBBLE | LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLL_ON_FOCUS));
+    applyKeyFocusStyle(msgLabel);
 #endif
     lv_obj_add_event_cb(msgLabel, ui_event_chatNodeButton, LV_EVENT_CLICKED, (void *)nodeNum);
 
@@ -7134,6 +7181,7 @@ void TFTView_320x240::addChat(uint32_t from, uint32_t to, uint8_t ch)
     lv_obj_add_flag(chatBtn, LV_OBJ_FLAG_SCROLL_ON_FOCUS);
 #if defined(SEEED_MESHPAGER_X2)
     lv_obj_add_flag(chatBtn, LV_OBJ_FLAG_EVENT_BUBBLE);
+    applyKeyFocusStyle(chatBtn);
 #endif
     lv_obj_clear_flag(chatBtn, LV_OBJ_FLAG_SCROLLABLE);
     add_style_home_button_style(chatBtn);
@@ -7593,6 +7641,11 @@ void TFTView_320x240::setInputGroup(lv_group_t *group)
 
     if (inputGroup && inputdriver->hasEncoderDevice())
         lv_indev_set_group(inputdriver->getEncoder(), inputGroup);
+
+    // a keypad bound to a group with no focused object drops ALL keys
+    // (lv_indev delivers data only to the focused object); make sure one exists
+    if (inputGroup && lv_group_get_obj_count(inputGroup) > 0 && lv_group_get_focused(inputGroup) == NULL)
+        lv_group_focus_next(inputGroup);
 #else
     // upstream behaviour: bind keyboard and pointer to the default group
     lv_group_t *default_group = lv_group_get_default();

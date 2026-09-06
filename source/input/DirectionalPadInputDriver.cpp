@@ -24,6 +24,18 @@
 #define INPUTDRIVER_DIRECTIONALPAD_WIRE Wire
 #endif
 
+// When INPUTDRIVER_DIRECTIONALPAD_RETURN_GPIO is defined (by the variant's
+// build flags), RETURN is a direct MCU GPIO (active-low, polled here every
+// read cycle because it has no expander INT) and the expander scan covers
+// only the d-pad bits P00-P04.  Otherwise RETURN is expander PORT0 bit 5,
+// scanned together with the d-pad.
+#ifdef INPUTDRIVER_DIRECTIONALPAD_RETURN_GPIO
+#define DIRECTIONALPAD_EXPANDER_BITS 5
+#else
+#define DIRECTIONALPAD_EXPANDER_BITS 6
+#endif
+#define DIRECTIONALPAD_EXPANDER_MASK ((1u << DIRECTIONALPAD_EXPANDER_BITS) - 1)
+
 // ---------------------------------------------------------------------------
 // File-scope TCA6424A reader instance
 // ---------------------------------------------------------------------------
@@ -36,6 +48,10 @@ volatile bool DirectionalPadInputDriver::inputPending = false;
 QueueHandle_t DirectionalPadInputDriver::eventQueue = nullptr;
 uint8_t DirectionalPadInputDriver::lastPortState = 0xFF; // all bits high = all buttons released
 uint32_t DirectionalPadInputDriver::prevKey = 0;
+
+#ifdef INPUTDRIVER_DIRECTIONALPAD_RETURN_GPIO
+static int lastReturnLevel = HIGH; // last raw digitalRead of the RETURN GPIO
+#endif
 
 // ---------------------------------------------------------------------------
 // PORT 0 bit index → LV_KEY mapping
@@ -92,6 +108,13 @@ void DirectionalPadInputDriver::init(void)
     pinMode(INPUTDRIVER_DIRECTIONALPAD_INT, INPUT_PULLUP);
     attachInterrupt(digitalPinToInterrupt(INPUTDRIVER_DIRECTIONALPAD_INT), intHandler, FALLING);
 
+#ifdef INPUTDRIVER_DIRECTIONALPAD_RETURN_GPIO
+    // RETURN sits on a direct MCU GPIO with an external pull-up (active-low);
+    // INPUT matches the board design. Baseline it like the expander port.
+    pinMode(INPUTDRIVER_DIRECTIONALPAD_RETURN_GPIO, INPUT);
+    lastReturnLevel = digitalRead(INPUTDRIVER_DIRECTIONALPAD_RETURN_GPIO);
+#endif
+
     keyboard = lv_indev_create();
     lv_indev_set_type(keyboard, LV_INDEV_TYPE_KEYPAD);
     lv_indev_set_read_cb(keyboard, button_read);
@@ -129,7 +152,7 @@ void DirectionalPadInputDriver::button_read(lv_indev_t *indev, lv_indev_data_t *
         uint8_t current = tca.readPort(0);
         if (current != 0xFF) { // 0xFF is the I2C-error sentinel; skip if bus failed
             uint8_t changed = current ^ lastPortState;
-            for (uint8_t bit = 0; bit < 6; bit++) {
+            for (uint8_t bit = 0; bit < DIRECTIONALPAD_EXPANDER_BITS; bit++) {
                 if (changed & (1u << bit)) {
                     uint32_t key = portBitToLvKey(bit);
                     if (key != 0) {
@@ -143,6 +166,20 @@ void DirectionalPadInputDriver::button_read(lv_indev_t *indev, lv_indev_data_t *
             lastPortState = current;
         }
     }
+
+#ifdef INPUTDRIVER_DIRECTIONALPAD_RETURN_GPIO
+    // RETURN has no expander INT; poll it every cycle and enqueue transitions
+    // exactly like an expander bit change.
+    {
+        int returnLevel = digitalRead(INPUTDRIVER_DIRECTIONALPAD_RETURN_GPIO);
+        if (returnLevel != lastReturnLevel) {
+            lastReturnLevel = returnLevel;
+            bool pressed = (returnLevel == LOW); // active-low, like every X2 button
+            PadEvent ev{LV_KEY_ESC, pressed ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED};
+            xQueueSend(eventQueue, &ev, 0);
+        }
+    }
+#endif
 
     // --- Step 2: deliver one queued transition event --------------------------
     PadEvent e;
@@ -158,8 +195,13 @@ void DirectionalPadInputDriver::button_read(lv_indev_t *indev, lv_indev_data_t *
     // --- Step 3: sustain PRESSED while a key is physically held -------------
     // The INT only fires on *changes*, not while a key is held steady, so we
     // keep reporting PRESSED so LVGL's long-press timer accumulates time.
-    uint8_t heldBits = ~lastPortState & 0x3Fu; // bits 0-5 only
-    if (heldBits != 0 && prevKey != 0) {
+    uint8_t heldBits = ~lastPortState & DIRECTIONALPAD_EXPANDER_MASK;
+#ifdef INPUTDRIVER_DIRECTIONALPAD_RETURN_GPIO
+    bool returnHeld = (lastReturnLevel == LOW);
+#else
+    bool returnHeld = false;
+#endif
+    if ((heldBits != 0 || returnHeld) && prevKey != 0) {
         data->key = prevKey;
         data->state = LV_INDEV_STATE_PRESSED;
         return;

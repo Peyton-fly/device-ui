@@ -7,6 +7,31 @@
 class MapPanel;
 
 /**
+ * @brief RAII helper to temporarily change the default LVGL input group
+ * Saves current group in ctor and restores it in dtor automatically.
+ * Ensures correct group assignment for dynamically created widgets.
+ */
+class GroupGuard
+{
+  private:
+    lv_group_t *saved_group;
+
+  public:
+    GroupGuard(lv_group_t *target_group) : saved_group(lv_group_get_default())
+    {
+        if (target_group) {
+            lv_group_set_default(target_group);
+        }
+    }
+
+    ~GroupGuard() { lv_group_set_default(saved_group); }
+
+    // Prevent copying
+    GroupGuard(const GroupGuard &) = delete;
+    GroupGuard &operator=(const GroupGuard &) = delete;
+};
+
+/**
  * @brief GUI view for e.g. T-Deck
  * Handles creation of display driver and controller.
  * Note: due to static callbacks in lvgl this class is modelled as
@@ -231,7 +256,8 @@ class TFTView_320x240 : public MeshtasticView
     void enablePanel(lv_obj_t *panel);
     void disablePanel(lv_obj_t *panel);
     void setGroupFocus(lv_obj_t *panel);
-    void setInputGroup(void);
+    void setInputGroup(lv_group_t *group = nullptr);
+    void cleanupAllOverlays(void);
     void setInputButtonLabel(void);
     void updateGroupChannel(uint8_t chId);
 
@@ -292,6 +318,10 @@ class TFTView_320x240 : public MeshtasticView
     static void ui_event_MessagesButton(lv_event_t *e);
     static void ui_event_MapButton(lv_event_t *e);
     static void ui_event_SettingsButton(lv_event_t *e);
+
+    static void ui_event_ScreenKey(lv_event_t *e);
+    static void ui_event_ButtonPanel(lv_event_t *e);
+    static void ui_event_tab_page(lv_event_t *e);
 
     static void ui_event_NodeButton(lv_event_t *e);
     static void ui_event_ChannelButton(lv_event_t *e);
@@ -376,6 +406,7 @@ class TFTView_320x240 : public MeshtasticView
 
     static void ui_event_pin_screen_button(lv_event_t *e);
     static void ui_event_statistics_table(lv_event_t *e);
+    static void ui_event_screen_focus_policy(lv_event_t *e);
 
     static void ui_event_ok(lv_event_t *e);
     static void ui_event_cancel(lv_event_t *e);
@@ -402,10 +433,12 @@ class TFTView_320x240 : public MeshtasticView
     lv_obj_t *activeButton = nullptr;
     lv_obj_t *activePanel = nullptr;
     lv_obj_t *activeTopPanel = nullptr;
+    lv_obj_t *lastMainButton = nullptr;
     lv_obj_t *activeMsgContainer = nullptr;
     lv_obj_t *activeWidget = nullptr;
     lv_obj_t *activeTextInput = nullptr;
     lv_group_t *input_group = nullptr;
+    lv_group_t *defaultPanelGroup = nullptr; // The default LVGL group for panel content widgets
 
     enum BasicSettings activeSettings = eNone; // active settings menu (used to disable other button presses)
 

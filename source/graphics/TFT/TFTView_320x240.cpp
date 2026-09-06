@@ -190,6 +190,23 @@ void TFTView_320x240::init(IClientBase *client)
     time(&lastrun5);
     time(&lastrun1);
 
+#if defined(SEEED_MESHPAGER_X2)
+    defaultPanelGroup = lv_group_get_default();
+
+    lv_obj_add_event_cb(objects.boot_screen, ui_event_screen_focus_policy, LV_EVENT_SCREEN_LOAD_START, NULL);
+    lv_obj_add_event_cb(objects.blank_screen, ui_event_screen_focus_policy, LV_EVENT_SCREEN_LOAD_START, NULL);
+
+    // Populate the mainButtons group with the wakeup button once the blank screen
+    // starts loading, so keyboard ENTER can click it.
+    lv_obj_add_event_cb(
+        objects.blank_screen,
+        [](lv_event_t *e) {
+            lv_group_add_obj(groups.mainButtons, objects.blank_screen_button);
+            lv_group_focus_obj(objects.blank_screen_button);
+        },
+        LV_EVENT_SCREEN_LOAD_START, NULL);
+#endif
+
     lv_obj_add_event_cb(objects.boot_logo_button, ui_event_LogoButton, LV_EVENT_ALL, NULL);
     lv_obj_add_event_cb(objects.blank_screen_button, ui_event_BlankScreenButton, LV_EVENT_ALL, NULL);
 
@@ -505,6 +522,10 @@ void TFTView_320x240::ui_set_active(lv_obj_t *b, lv_obj_t *p, lv_obj_t *tp)
 
     activeButton = b;
     activePanel = p;
+#if defined(SEEED_MESHPAGER_X2)
+    lastMainButton = b; // Track which main button was selected for ESC return
+    setInputGroup(defaultPanelGroup);
+#endif
     if (activePanel == objects.messages_panel) {
         lv_group_focus_obj(objects.message_input_area);
     } else if (inputdriver->hasKeyboardDevice() || inputdriver->hasEncoderDevice()) {
@@ -541,11 +562,41 @@ void TFTView_320x240::enterProgrammingMode(void)
         lv_obj_set_style_text_font(objects.firmware_label, &ui_font_montserrat_20, LV_PART_MAIN | LV_STATE_DEFAULT);
         lv_obj_add_flag(objects.boot_logo, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(objects.boot_logo_button, LV_OBJ_FLAG_HIDDEN);
+#if defined(SEEED_MESHPAGER_X2)
+        lv_group_remove_obj(objects.boot_logo_button);
+        lv_obj_remove_flag(objects.boot_logo_button, LV_OBJ_FLAG_CLICK_FOCUSABLE);
+#endif
         lv_obj_remove_flag(objects.bluetooth_button, LV_OBJ_FLAG_HIDDEN);
+#if defined(SEEED_MESHPAGER_X2)
+        lv_obj_remove_flag(objects.bluetooth_button, LV_OBJ_FLAG_CLICK_FOCUSABLE);
+        lv_group_add_obj(lv_group_get_default(), objects.bluetooth_button);
+        lv_group_focus_obj(objects.bluetooth_button);
+#endif
         lv_obj_add_event_cb(objects.bluetooth_button, ui_event_BluetoothButton, LV_EVENT_LONG_PRESSED, NULL);
         ILOG_INFO("### MUI programming mode entered (nodeId=!%08x) ###", ownNode);
     }
 }
+
+#if defined(SEEED_MESHPAGER_X2)
+/**
+ * @brief give every widget below "parent" the LV_OBJ_FLAG_EVENT_BUBBLE flag
+ *
+ * The 425 lineage exported its generated screens with LV_OBJ_FLAG_EVENT_BUBBLE
+ * set on all containers and interactive widgets. That flag is what carries
+ * LV_EVENT_KEY from the group's focused object up to the screen-level key
+ * handlers (ui_event_ScreenKey, ui_event_ButtonPanel, ui_event_tab_page) -
+ * bubbling stops at the first ancestor without it. This lineage's generated
+ * layer dropped the flags, so they are restored at runtime instead.
+ */
+static void addKeyBubbleFlags(lv_obj_t *parent)
+{
+    for (uint32_t i = 0; i < lv_obj_get_child_count(parent); i++) {
+        lv_obj_t *child = lv_obj_get_child(parent, i);
+        lv_obj_add_flag(child, LV_OBJ_FLAG_EVENT_BUBBLE);
+        addKeyBubbleFlags(child);
+    }
+}
+#endif // SEEED_MESHPAGER_X2
 
 /**
  * @brief fix quirks in the generated ui
@@ -553,6 +604,72 @@ void TFTView_320x240::enterProgrammingMode(void)
  */
 void TFTView_320x240::apply_hotfix(void)
 {
+#if defined(SEEED_MESHPAGER_X2)
+    // lv_imagebutton widgets are not group-default in LVGL, so add map controls explicitly.
+    if (lv_group_t *group = lv_group_get_default()) {
+        lv_group_add_obj(group, objects.nav_button);
+        lv_group_add_obj(group, objects.arrow_up_button);
+        lv_group_add_obj(group, objects.arrow_left_button);
+        lv_group_add_obj(group, objects.arrow_right_button);
+        lv_group_add_obj(group, objects.arrow_down_button);
+        lv_group_add_obj(group, objects.gps_lock_button);
+        lv_group_add_obj(group, objects.zoom_in_button);
+        lv_group_add_obj(group, objects.zoom_out_button);
+    }
+
+    // for keyboard control: main menu buttons are moved into own group
+    lv_group_remove_obj(objects.home_button);
+    lv_group_remove_obj(objects.nodes_button);
+    lv_group_remove_obj(objects.groups_button);
+    lv_group_remove_obj(objects.messages_button);
+    lv_group_remove_obj(objects.map_button);
+    lv_group_remove_obj(objects.settings_button);
+
+    lv_group_add_obj(groups.mainButtons, objects.home_button);
+    lv_group_add_obj(groups.mainButtons, objects.nodes_button);
+    lv_group_add_obj(groups.mainButtons, objects.groups_button);
+    lv_group_add_obj(groups.mainButtons, objects.messages_button);
+    lv_group_add_obj(groups.mainButtons, objects.map_button);
+    lv_group_add_obj(groups.mainButtons, objects.settings_button);
+
+    if (defaultPanelGroup) {
+        // These live on non-active screens and should never be reached by keyboard NEXT/PREV traversal.
+        lv_group_remove_obj(objects.bluetooth_button);
+        lv_group_remove_obj(objects.boot_logo_button);
+        lv_group_remove_obj(objects.blank_screen_button);
+        lv_group_remove_obj(objects.screen_lock_button_matrix);
+    }
+
+    // Keep click/touch behavior, but prevent these controls from becoming focus targets.
+    lv_obj_clear_flag(objects.bluetooth_button, LV_OBJ_FLAG_CLICK_FOCUSABLE);
+    lv_obj_clear_flag(objects.boot_logo_button, LV_OBJ_FLAG_CLICK_FOCUSABLE);
+    lv_obj_clear_flag(objects.blank_screen_button, LV_OBJ_FLAG_CLICK_FOCUSABLE);
+    lv_obj_clear_flag(objects.screen_lock_button_matrix, LV_OBJ_FLAG_CLICK_FOCUSABLE);
+
+    // Keep screen-specific controls focusable only on their own screen.
+    lv_obj_add_event_cb(objects.main_screen, ui_event_screen_focus_policy, LV_EVENT_SCREEN_LOAD_START, NULL);
+    lv_obj_add_event_cb(objects.blank_screen, ui_event_screen_focus_policy, LV_EVENT_SCREEN_LOAD_START, NULL);
+    lv_obj_add_event_cb(objects.lock_screen, ui_event_screen_focus_policy, LV_EVENT_SCREEN_LOAD_START, NULL);
+    lv_obj_add_event_cb(objects.calibration_screen, ui_event_screen_focus_policy, LV_EVENT_SCREEN_LOAD_START, NULL);
+
+    // capture tabview keys and forward them to the screen key handler
+    lv_obj_add_event_cb(objects.tab_page_filter, ui_event_tab_page, LV_EVENT_KEY, NULL);
+    lv_obj_add_event_cb(objects.tab_page_highlight, ui_event_tab_page, LV_EVENT_KEY, NULL);
+
+    // remove signal scanner sliders from the focus group
+    lv_group_remove_obj(objects.rssi_slider);
+    lv_group_remove_obj(objects.snr_slider);
+    lv_obj_clear_flag(objects.snr_slider, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(objects.rssi_slider, LV_OBJ_FLAG_CLICKABLE);
+
+    // restore the key event bubbling the generated layer of this lineage lacks
+    addKeyBubbleFlags(objects.main_screen);
+    addKeyBubbleFlags(objects.boot_screen);
+    addKeyBubbleFlags(objects.blank_screen);
+    addKeyBubbleFlags(objects.lock_screen);
+    addKeyBubbleFlags(objects.calibration_screen);
+#endif
+
     // adapt screens to custom display resolution
     uint32_t h = lv_display_get_horizontal_resolution(displaydriver->getDisplay());
     uint32_t v = lv_display_get_vertical_resolution(displaydriver->getDisplay());
@@ -615,6 +732,15 @@ void TFTView_320x240::apply_hotfix(void)
     applyStyle(tab_buttons);
     tab_buttons = lv_tabview_get_tab_bar(objects.controller_tab_view);
     applyStyle(tab_buttons);
+#if defined(SEEED_MESHPAGER_X2)
+    // X2-FIX: lv_tabview's internal content container (created by lv_obj_create in
+    // lv_tabview.c:277) does NOT inherit LV_OBJ_FLAG_EVENT_BUBBLE. Without this,
+    // KEY events from basic_settings_*_button bubble only as far as that container
+    // and never reach main_screen's ui_event_ScreenKey handler — so RETURN on
+    // controller_panel can't navigate back to settings_button. Other panels
+    // (Home/Messages/Nodes/Groups/Map) work because they have no internal tabview.
+    lv_obj_add_flag(lv_tabview_get_content(objects.controller_tab_view), LV_OBJ_FLAG_EVENT_BUBBLE);
+#endif
     tab_buttons = lv_tabview_get_tab_bar(ui_SettingsTabView);
     applyStyle(tab_buttons);
 
@@ -738,6 +864,14 @@ void TFTView_320x240::ui_events_init(void)
     lv_obj_add_event_cb(objects.messages_button, this->ui_event_MessagesButton, LV_EVENT_ALL, NULL);
     lv_obj_add_event_cb(objects.map_button, this->ui_event_MapButton, LV_EVENT_ALL, NULL);
     lv_obj_add_event_cb(objects.settings_button, this->ui_event_SettingsButton, LV_EVENT_ALL, NULL);
+
+#if defined(SEEED_MESHPAGER_X2)
+    lv_obj_add_event_cb(objects.button_panel, this->ui_event_ButtonPanel, LV_EVENT_KEY, NULL);
+
+    // Global screen key handler for ESC key navigation
+    lv_obj_add_event_cb(objects.main_screen, this->ui_event_ScreenKey, LV_EVENT_KEY, NULL);
+    lv_obj_add_event_cb(objects.boot_screen, this->ui_event_ScreenKey, LV_EVENT_KEY, NULL);
+#endif
 
     // home buttons
     lv_obj_add_event_cb(objects.home_mail_button, this->ui_event_EnvelopeButton, LV_EVENT_CLICKED, NULL);
@@ -916,6 +1050,30 @@ void TFTView_320x240::ui_events_init(void)
     lv_obj_add_event_cb(objects.signal_scanner_start_button, ui_event_signal_scanner_start, LV_EVENT_ALL, 0);
     lv_obj_add_event_cb(objects.trace_route_to_button, ui_event_trace_route_to, LV_EVENT_CLICKED, 0);
     lv_obj_add_event_cb(objects.trace_route_start_button, ui_event_trace_route_start, LV_EVENT_CLICKED, 0);
+
+#if defined(SEEED_MESHPAGER_X2)
+    // Keep the main nav buttons in their own focus group: re-populate the group on
+    // every load of main_screen and restore the last focused nav button (handlers
+    // fire in registration order, after any earlier SCREEN_LOAD_START callbacks).
+    lv_obj_add_event_cb(
+        objects.main_screen,
+        [](lv_event_t *e) {
+            if (lv_event_get_code(e) == LV_EVENT_SCREEN_LOAD_START) {
+                // lv_group_remove_all_objs() on NULL would trip LV_ASSERT_NULL (while(1))
+                if (groups.mainButtons)
+                    lv_group_remove_all_objs(groups.mainButtons);
+                lv_group_add_obj(groups.mainButtons, objects.home_button);
+                lv_group_add_obj(groups.mainButtons, objects.nodes_button);
+                lv_group_add_obj(groups.mainButtons, objects.groups_button);
+                lv_group_add_obj(groups.mainButtons, objects.messages_button);
+                lv_group_add_obj(groups.mainButtons, objects.map_button);
+                lv_group_add_obj(groups.mainButtons, objects.settings_button);
+                lv_obj_t *btn = THIS->lastMainButton ? THIS->lastMainButton : objects.home_button;
+                lv_group_focus_obj(btn);
+            }
+        },
+        LV_EVENT_SCREEN_LOAD_START, NULL);
+#endif
 }
 
 #if 0 // defined above as lambda function for tests
@@ -926,6 +1084,148 @@ void TDeckGUI::ui_event_HomeButton(lv_event_t * e) {
     }
 }
 #endif
+
+#if defined(SEEED_MESHPAGER_X2)
+/**
+ * Handle ESC, back, and left to move focus to main buttons group
+ */
+void TFTView_320x240::ui_event_ScreenKey(lv_event_t *e)
+{
+    lv_event_code_t event_code = lv_event_get_code(e);
+    if (event_code == LV_EVENT_KEY) {
+        const void *param = lv_event_get_param(e);
+        if (!param)
+            return;
+
+        uint32_t c = *(const uint32_t *)param;
+        if (c == LV_KEY_ESC) {
+            // leave reboot screen
+            if (THIS->activeSettings == eReboot) {
+                lv_obj_send_event(objects.cancel_reboot_button, LV_EVENT_CLICKED, nullptr);
+                lv_event_stop_processing(e);
+                return;
+            } else if (THIS->activeSettings != eNone) {
+                // in settings dialogs, route ESC/BACKSPACE through existing cancel logic.
+                lv_obj_send_event(objects.obj2__cancel_button_w, LV_EVENT_CLICKED, nullptr);
+                lv_event_stop_processing(e);
+                return;
+            }
+        }
+
+        if ((c == LV_KEY_LEFT || c == LV_KEY_BACKSPACE) &&
+            (THIS->activeSettings != eNone || THIS->activePanel == objects.node_options_panel ||
+             !lv_obj_has_flag(objects.map_osd_panel, LV_OBJ_FLAG_HIDDEN))) {
+            // we're in a settings/options/osd dialog
+            return;
+        }
+
+        // Handle ESC/LEFT to return to main menu from any right panel.
+        // TODO: Check for devices that have only a backspace key
+        if (c == LV_KEY_ESC || c == LV_KEY_LEFT) {
+            // Clean up any overlays (keyboard, QR code, popups, settings dialogs) before returning to menu
+            THIS->cleanupAllOverlays();
+            THIS->setInputGroup(groups.mainButtons);
+            lv_obj_t *target = THIS->lastMainButton ? THIS->lastMainButton : objects.home_button;
+            lv_group_focus_obj(target);
+            lv_event_stop_processing(e); // Stop propagation so panel buttons don't see it
+            return;
+        }
+
+        // All other keys propagate normally to focused widget
+        ILOG_DEBUG("ui_event_ScreenKey: pass key to widget: 0x%02x", c);
+    }
+}
+
+// capture tabview keys
+void TFTView_320x240::ui_event_tab_page(lv_event_t *e)
+{
+    uint32_t key = lv_event_get_key(e);
+    if (key == LV_KEY_LEFT || key == LV_KEY_RIGHT || key == LV_KEY_ESC) {
+        lv_event_stop_processing(e);
+        lv_obj_send_event(objects.main_screen, LV_EVENT_KEY, lv_event_get_param(e));
+    }
+}
+
+void TFTView_320x240::ui_event_screen_focus_policy(lv_event_t *e)
+{
+    lv_obj_t *screen = lv_event_get_target_obj(e);
+    if (!screen) {
+        return;
+    }
+
+    auto applyButtonPolicy = [&](lv_obj_t *obj, bool enableForScreen) {
+        if (!obj) {
+            return;
+        }
+
+        if (enableForScreen) {
+            lv_obj_clear_flag(obj, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(obj, LV_OBJ_FLAG_CLICK_FOCUSABLE);
+            if (groups.mainButtons) {
+                lv_group_add_obj(groups.mainButtons, obj);
+            }
+        } else {
+            lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_clear_flag(obj, LV_OBJ_FLAG_CLICK_FOCUSABLE);
+            if (groups.mainButtons) {
+                lv_group_remove_obj(obj);
+            }
+        }
+    };
+
+    applyButtonPolicy(objects.blank_screen_button, screen == objects.blank_screen);
+    applyButtonPolicy(objects.screen_lock_button_matrix, screen == objects.lock_screen);
+}
+
+void TFTView_320x240::ui_event_ButtonPanel(lv_event_t *e)
+{
+    lv_event_code_t event_code = lv_event_get_code(e);
+    if (event_code == LV_EVENT_KEY) {
+        const void *param = lv_event_get_param(e);
+        if (!param)
+            return;
+
+        uint32_t c = *(const uint32_t *)param;
+        ILOG_DEBUG("ui_event_ButtonPanel -> processing key '%c'(0x%02x)", (char)c, c);
+        switch (c) {
+        case 0x0d:
+        case LV_KEY_ENTER: {
+            // Do NOT manually inject LV_EVENT_CLICKED here.
+            // The firmware's LVGL calls lv_group_send_data(g, LV_KEY_ENTER) on PRESS
+            // (generating this KEY event) AND sends LV_EVENT_CLICKED natively on RELEASE.
+            // A manual injection switches the indev group during PRESS, causing LVGL's
+            // RELEASE path to send a spurious LV_EVENT_CLICKED to the newly focused panel
+            // object instead of the nav button.
+            lv_event_stop_processing(e);
+            break;
+        }
+        case LV_KEY_LEFT: {
+            // use left key in main menu also as long press
+            if (THIS->activeSettings == eNone) {
+                lv_obj_send_event(lv_event_get_target_obj(e), LV_EVENT_LONG_PRESSED, nullptr);
+                lv_event_stop_processing(e);
+            }
+            break;
+        }
+        case LV_KEY_RIGHT: {
+            // move to visible object on right pane; restore the last focused object in the panel group
+            lv_obj_t *lastFocused = lv_group_get_focused(THIS->defaultPanelGroup);
+            THIS->setInputGroup(THIS->defaultPanelGroup);
+            if (lastFocused)
+                lv_group_focus_obj(lastFocused);
+            lv_event_stop_processing(e);
+            break;
+        }
+        case LV_KEY_UP:
+            break;
+        case LV_KEY_DOWN:
+            break;
+        default:
+            break;
+        }
+    }
+}
+#endif // SEEED_MESHPAGER_X2
 
 void TFTView_320x240::timer_event_reboot(lv_timer_t *timer)
 {
@@ -1178,6 +1478,9 @@ void TFTView_320x240::ui_event_MapButton(lv_event_t *e)
                 lv_obj_clear_flag(objects.zoom_in_button, LV_OBJ_FLAG_HIDDEN);
                 lv_obj_clear_flag(objects.zoom_out_button, LV_OBJ_FLAG_HIDDEN);
                 lv_obj_clear_flag(objects.navigation_panel, LV_OBJ_FLAG_HIDDEN);
+#if defined(SEEED_MESHPAGER_X2)
+                lv_group_focus_obj(objects.nav_button);
+#endif
             } else {
                 lv_obj_add_flag(objects.zoom_slider, LV_OBJ_FLAG_HIDDEN);
                 lv_obj_add_flag(objects.gps_lock_button, LV_OBJ_FLAG_HIDDEN);
@@ -1193,6 +1496,10 @@ void TFTView_320x240::ui_event_MapButton(lv_event_t *e)
         lv_obj_add_flag(objects.map_osd_panel, LV_OBJ_FLAG_HIDDEN);
     } else if (event_code == LV_EVENT_LONG_PRESSED && THIS->activeSettings == eNone) {
         lv_obj_clear_flag(objects.map_osd_panel, LV_OBJ_FLAG_HIDDEN);
+#if defined(SEEED_MESHPAGER_X2)
+        THIS->setInputGroup(THIS->defaultPanelGroup);
+        lv_group_focus_obj(objects.map_brightness_slider);
+#endif
         ignoreClicked = true;
     }
 }
@@ -2755,6 +3062,9 @@ void TFTView_320x240::updateLocationMap(uint32_t num)
  */
 void TFTView_320x240::addOrUpdateMap(uint32_t nodeNum, int32_t lat, int32_t lon)
 {
+    // Ensure all dynamically created widgets go to the panel content group
+    GroupGuard group_guard(defaultPanelGroup);
+
     auto it = nodeObjects.find(nodeNum);
     if (it == nodeObjects.end()) {
         uint32_t bgColor, fgColor;
@@ -4648,10 +4958,16 @@ void TFTView_320x240::handleAddMessage(char *msg)
 void TFTView_320x240::addMessage(lv_obj_t *container, uint32_t msgTime, uint32_t requestId, char *msg,
                                  LogMessage::MsgStatus status)
 {
+    // Ensure all dynamically created widgets go to the panel content group
+    GroupGuard group_guard(defaultPanelGroup);
+
     lv_obj_t *hiddenPanel = lv_obj_create(container);
     lv_obj_set_width(hiddenPanel, lv_pct(100));
     lv_obj_set_height(hiddenPanel, LV_SIZE_CONTENT);
     lv_obj_set_align(hiddenPanel, LV_ALIGN_CENTER);
+#if defined(SEEED_MESHPAGER_X2)
+    lv_obj_add_flag(hiddenPanel, LV_OBJ_FLAG_EVENT_BUBBLE);
+#endif
     lv_obj_clear_flag(hiddenPanel, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_radius(hiddenPanel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     add_style_panel_style(hiddenPanel);
@@ -4670,12 +4986,20 @@ void TFTView_320x240::addMessage(lv_obj_t *container, uint32_t msgTime, uint32_t
     strcat(&buf[len], msg);
 
     lv_obj_t *textLabel = lv_label_create(hiddenPanel);
+#if defined(SEEED_MESHPAGER_X2)
+    lv_group_add_obj(defaultPanelGroup, textLabel);
+#endif
     // calculate expected size of text bubble, to make it look nicer
     lv_coord_t width = lv_txt_get_width(buf, strlen(buf), &ui_font_montserrat_12, 0);
     lv_obj_set_width(textLabel, std::max<int32_t>(std::min<int32_t>(width, 200) + 10, 40));
     lv_obj_set_height(textLabel, LV_SIZE_CONTENT);
     lv_obj_set_y(textLabel, 0);
     lv_obj_set_align(textLabel, LV_ALIGN_RIGHT_MID);
+#if defined(SEEED_MESHPAGER_X2)
+    // make the message bubble focusable and chain key events upward
+    lv_obj_add_flag(textLabel, lv_obj_flag_t(LV_OBJ_FLAG_EVENT_BUBBLE | LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CLICK_FOCUSABLE |
+                                             LV_OBJ_FLAG_SCROLL_ON_FOCUS));
+#endif
     lv_label_set_text(textLabel, buf);
 
     add_style_chat_message_style(textLabel);
@@ -4716,6 +5040,9 @@ void TFTView_320x240::addNode(uint32_t nodeNum, uint8_t ch, const char *userShor
     // [10]: lbl telemetry 2       | iaq
     // panel user_data: ch
 
+    // Ensure all dynamically created widgets go to the panel content group
+    GroupGuard group_guard(defaultPanelGroup);
+
     ILOG_DEBUG("addNode(%d): num=0x%08x, lastseen=%d, name=%s(%s), role=%d", nodeCount, nodeNum, lastHeard, userLong, userShort,
                role);
     while (nodeCount >= MAX_NUM_NODES_VIEW) {
@@ -4733,6 +5060,9 @@ void TFTView_320x240::addNode(uint32_t nodeNum, uint8_t ch, const char *userShor
     lv_obj_set_pos(p, LV_PCT(0), 0);
     lv_obj_set_size(p, LV_PCT(100), 53);
     lv_obj_set_align(p, LV_ALIGN_CENTER);
+#if defined(SEEED_MESHPAGER_X2)
+    lv_obj_add_flag(p, LV_OBJ_FLAG_EVENT_BUBBLE);
+#endif
     lv_obj_set_style_pad_top(p, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_bottom(p, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_remove_flag(p, lv_obj_flag_t(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_PRESS_LOCK | LV_OBJ_FLAG_CLICK_FOCUSABLE |
@@ -4766,6 +5096,9 @@ void TFTView_320x240::addNode(uint32_t nodeNum, uint8_t ch, const char *userShor
     add_style_node_button_style(nodeButton);
     lv_obj_set_align(nodeButton, LV_ALIGN_CENTER);
     lv_obj_add_flag(nodeButton, LV_OBJ_FLAG_SCROLL_ON_FOCUS);
+#if defined(SEEED_MESHPAGER_X2)
+    lv_obj_add_flag(nodeButton, LV_OBJ_FLAG_EVENT_BUBBLE);
+#endif
     lv_obj_set_style_shadow_width(nodeButton, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_max_height(nodeButton, 132, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_min_height(nodeButton, 50, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -5562,6 +5895,9 @@ void TFTView_320x240::handleResponse(uint32_t from, uint32_t id, const meshtasti
 
 void TFTView_320x240::addNodeToTraceRoute(uint32_t nodeNum, lv_obj_t *panel)
 {
+    // Ensure all dynamically created widgets go to the panel content group
+    GroupGuard group_guard(defaultPanelGroup);
+
     // check if node exists, and get its panel
     lv_obj_t *nodePanel = nullptr;
     auto it = nodes.find(nodeNum);
@@ -5985,6 +6321,11 @@ void TFTView_320x240::blankScreen(bool enable)
 void TFTView_320x240::screenSaving(bool enabled)
 {
     if (enabled) {
+#if defined(SEEED_MESHPAGER_X2)
+        // switch the keyboard indev to mainButtons now; the SCREEN_LOAD_START handler will
+        // add blank_screen_button to the group and focus it once the screen starts loading
+        setInputGroup(groups.mainButtons);
+#endif
         // overlay main screen with blank screen to prevent accidentally pressing buttons
         lv_screen_load_anim(objects.blank_screen, LV_SCR_LOAD_ANIM_FADE_OUT, 0, 0, false);
         lv_group_focus_obj(objects.blank_screen_button);
@@ -6004,6 +6345,9 @@ void TFTView_320x240::screenSaving(bool enabled)
             screenLocked = false;
         } else {
             ILOG_DEBUG("showing boot screen");
+#if defined(SEEED_MESHPAGER_X2)
+            setInputGroup(defaultPanelGroup);
+#endif
             lv_screen_load_anim(objects.boot_screen, LV_SCR_LOAD_ANIM_NONE, 0, 0, false);
             screenLocked = false;
         }
@@ -6529,6 +6873,8 @@ void TFTView_320x240::updateTime(uint32_t timeVal)
  */
 lv_obj_t *TFTView_320x240::newMessageContainer(uint32_t from, uint32_t to, uint8_t ch)
 {
+    // Ensure all dynamically created widgets go to the panel content group
+    GroupGuard group_guard(defaultPanelGroup);
     if (to == UINT32_MAX || from == 0) {
         if (channelGroup[ch] != nullptr)
             return channelGroup[ch];
@@ -6548,6 +6894,9 @@ lv_obj_t *TFTView_320x240::newMessageContainer(uint32_t from, uint32_t to, uint8
     lv_obj_set_align(container, LV_ALIGN_TOP_MID);
     lv_obj_set_flex_flow(container, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(container, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+#if defined(SEEED_MESHPAGER_X2)
+    lv_obj_add_flag(container, LV_OBJ_FLAG_EVENT_BUBBLE);
+#endif
     lv_obj_clear_flag(container, lv_obj_flag_t(LV_OBJ_FLAG_PRESS_LOCK | LV_OBJ_FLAG_CLICK_FOCUSABLE | LV_OBJ_FLAG_GESTURE_BUBBLE |
                                                LV_OBJ_FLAG_SNAPPABLE | LV_OBJ_FLAG_SCROLL_ELASTIC)); /// Flags
     lv_obj_set_scrollbar_mode(container, LV_SCROLLBAR_MODE_ACTIVE);
@@ -6585,6 +6934,9 @@ lv_obj_t *TFTView_320x240::newMessageContainer(uint32_t from, uint32_t to, uint8
  */
 void TFTView_320x240::newMessage(uint32_t from, uint32_t to, uint8_t ch, const char *msg, uint32_t &msgTime, bool restore)
 {
+    // Ensure all dynamically created widgets go to the panel content group
+    GroupGuard group_guard(defaultPanelGroup);
+
     ILOG_DEBUG("newMessage: from:0x%08x, to:0x%08x, ch:%d, time:%d", from, to, ch, msgTime);
     int pos = 0;
     char buf[284]; // 237 + 4 + 40 + 2 + 1
@@ -6646,10 +6998,16 @@ void TFTView_320x240::newMessage(uint32_t from, uint32_t to, uint8_t ch, const c
  */
 void TFTView_320x240::newMessage(uint32_t nodeNum, lv_obj_t *container, uint8_t ch, const char *msg)
 {
+    // Ensure all dynamically created widgets go to the panel content group
+    GroupGuard group_guard(defaultPanelGroup);
+
     lv_obj_t *hiddenPanel = lv_obj_create(container);
     lv_obj_set_width(hiddenPanel, lv_pct(100));
     lv_obj_set_height(hiddenPanel, LV_SIZE_CONTENT); /// 50
     lv_obj_set_align(hiddenPanel, LV_ALIGN_CENTER);
+#if defined(SEEED_MESHPAGER_X2)
+    lv_obj_add_flag(hiddenPanel, LV_OBJ_FLAG_EVENT_BUBBLE);
+#endif
     lv_obj_clear_flag(hiddenPanel, LV_OBJ_FLAG_SCROLLABLE); /// Flags
     lv_obj_set_style_radius(hiddenPanel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     add_style_panel_style(hiddenPanel);
@@ -6659,6 +7017,9 @@ void TFTView_320x240::newMessage(uint32_t nodeNum, lv_obj_t *container, uint8_t 
     lv_obj_set_style_pad_bottom(hiddenPanel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     lv_obj_t *msgLabel = lv_label_create(hiddenPanel);
+#if defined(SEEED_MESHPAGER_X2)
+    lv_group_add_obj(defaultPanelGroup, msgLabel);
+#endif
     // calculate expected size of text bubble, to make it look nicer
     lv_coord_t width = lv_txt_get_width(msg, strlen(msg), &ui_font_montserrat_14, 0);
     lv_obj_set_width(msgLabel, std::max<int32_t>(std::min<int32_t>((int32_t)(width), 160) + 10, 40));
@@ -6667,6 +7028,9 @@ void TFTView_320x240::newMessage(uint32_t nodeNum, lv_obj_t *container, uint8_t 
     lv_label_set_text(msgLabel, msg);
     add_style_new_message_style(msgLabel);
     lv_obj_add_flag(msgLabel, LV_OBJ_FLAG_CLICK_FOCUSABLE);
+#if defined(SEEED_MESHPAGER_X2)
+    lv_obj_add_flag(msgLabel, lv_obj_flag_t(LV_OBJ_FLAG_EVENT_BUBBLE | LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLL_ON_FOCUS));
+#endif
     lv_obj_add_event_cb(msgLabel, ui_event_chatNodeButton, LV_EVENT_CLICKED, (void *)nodeNum);
 
     if (state == MeshtasticView::eRunning) {
@@ -6752,6 +7116,9 @@ void TFTView_320x240::restoreMessage(const LogMessage &msg)
  */
 void TFTView_320x240::addChat(uint32_t from, uint32_t to, uint8_t ch)
 {
+    // Ensure all dynamically created widgets go to the panel content group
+    GroupGuard group_guard(defaultPanelGroup);
+
     uint32_t index = ((to == UINT32_MAX || from == 0) ? ch : from);
     auto it = chats.find(index);
     if (it != chats.end())
@@ -6765,6 +7132,9 @@ void TFTView_320x240::addChat(uint32_t from, uint32_t to, uint8_t ch)
     lv_obj_set_pos(chatBtn, 0, 0);
     lv_obj_set_size(chatBtn, LV_PCT(100), buttonSize);
     lv_obj_add_flag(chatBtn, LV_OBJ_FLAG_SCROLL_ON_FOCUS);
+#if defined(SEEED_MESHPAGER_X2)
+    lv_obj_add_flag(chatBtn, LV_OBJ_FLAG_EVENT_BUBBLE);
+#endif
     lv_obj_clear_flag(chatBtn, LV_OBJ_FLAG_SCROLLABLE);
     add_style_home_button_style(chatBtn);
     lv_obj_set_style_align(chatBtn, LV_ALIGN_TOP_MID, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -7062,6 +7432,9 @@ void TFTView_320x240::hideKeyboard(lv_obj_t *panel)
 
 lv_obj_t *TFTView_320x240::showQrCode(lv_obj_t *parent, const char *data)
 {
+    // Ensure all dynamically created widgets go to the panel content group
+    GroupGuard group_guard(defaultPanelGroup);
+
     lv_color_t bg_color = colorMesh;
     lv_color_t fg_color = lv_palette_darken(LV_PALETTE_BLUE, 4);
     qr = lv_qrcode_create(parent);
@@ -7132,7 +7505,9 @@ void TFTView_320x240::setGroupFocus(lv_obj_t *panel)
             lv_group_focus_obj(panel->spec_attr->children[1]); // TODO: does not work
         }
     } else if (panel == objects.map_panel) {
-
+#if defined(SEEED_MESHPAGER_X2)
+        lv_group_focus_obj(objects.nav_button);
+#endif
     } else if (panel == objects.settings_screen_lock_panel) {
         lv_group_focus_obj(objects.screen_lock_button_matrix);
     } else if (panel == objects.controller_panel) {
@@ -7147,18 +7522,85 @@ void TFTView_320x240::setGroupFocus(lv_obj_t *panel)
     }
 }
 
+#if defined(SEEED_MESHPAGER_X2)
+void TFTView_320x240::cleanupAllOverlays(void)
+{
+    // Close settings dialog if open by triggering cancel button
+    if (activeSettings != eNone) {
+        lv_obj_send_event(objects.obj2__cancel_button_w, LV_EVENT_CLICKED, NULL);
+        return; // Cancel button handler will manage the rest
+    }
+
+    // Close keyboard if visible
+    if (objects.keyboard && !lv_obj_has_flag(objects.keyboard, LV_OBJ_FLAG_HIDDEN)) {
+        hideKeyboard(activePanel);
+    }
+
+    // Close QR code if visible
+    if (qr) {
+        lv_obj_add_flag(objects.home_show_qr_panel, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_delete(qr);
+        qr = nullptr;
+    }
+
+    // Close message popup if visible
+    if (objects.msg_popup_panel && !lv_obj_has_flag(objects.msg_popup_panel, LV_OBJ_FLAG_HIDDEN)) {
+        hideMessagePopup();
+    }
+}
+#endif // SEEED_MESHPAGER_X2
+
 /**
  * input group used by keyboard and/or pointer for dynamic assignment
  */
-void TFTView_320x240::setInputGroup(void)
+void TFTView_320x240::setInputGroup(lv_group_t *group)
 {
-    lv_group_t *group = lv_group_get_default();
+#if defined(SEEED_MESHPAGER_X2)
+    // defocus old object in current group if it changed
+    if (inputdriver->hasKeyboardDevice()) {
+        lv_group_t *old_group = lv_indev_get_group(inputdriver->getKeyboard());
+        if (old_group == group)
+            return;
+        if (old_group) {
+            lv_obj_t *old_focused = lv_group_get_focused(old_group);
+            if (old_focused) {
+                lv_obj_remove_state(old_focused, LV_STATE_FOCUSED | LV_STATE_FOCUS_KEY);
+                lv_obj_send_event(old_focused, LV_EVENT_DEFOCUSED, NULL);
+                lv_obj_invalidate(old_focused);
+            }
+        }
+    }
 
-    if (group && inputdriver->hasKeyboardDevice())
-        lv_indev_set_group(inputdriver->getKeyboard(), group);
+    lv_group_t *inputGroup = nullptr;
+    if (group) {
+        lv_group_set_default(group);
+        inputGroup = group;
+    } else {
+        lv_indev_t *indev = lv_indev_get_act();
+        if (indev == NULL)
+            inputGroup = inputdriver->getInputGroup();
+        else
+            inputGroup = lv_indev_get_group(indev);
+        if (inputGroup == nullptr)
+            inputGroup = lv_group_get_default();
+    }
 
-    if (group && inputdriver->hasPointerDevice())
-        lv_indev_set_group(inputdriver->getPointer(), group);
+    if (inputGroup && inputdriver->hasKeyboardDevice())
+        lv_indev_set_group(inputdriver->getKeyboard(), inputGroup);
+
+    if (inputGroup && inputdriver->hasPointerDevice())
+        lv_indev_set_group(inputdriver->getPointer(), inputGroup);
+
+    if (inputGroup && inputdriver->hasEncoderDevice())
+        lv_indev_set_group(inputdriver->getEncoder(), inputGroup);
+#else
+    // upstream behaviour: bind keyboard and pointer to the default group
+    lv_group_t *default_group = lv_group_get_default();
+    if (default_group && inputdriver->hasKeyboardDevice())
+        lv_indev_set_group(inputdriver->getKeyboard(), default_group);
+    if (default_group && inputdriver->hasPointerDevice())
+        lv_indev_set_group(inputdriver->getPointer(), default_group);
+#endif
 }
 
 void TFTView_320x240::setInputButtonLabel(void)

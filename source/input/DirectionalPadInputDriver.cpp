@@ -60,9 +60,16 @@ uint32_t DirectionalPadInputDriver::portBitToLvKey(uint8_t bit)
 {
     switch (bit) {
     case 0:
-        return LV_KEY_UP;
+        // LVGL's keypad protocol only moves focus on NEXT/PREV (lv_indev.c);
+        // raw UP/DOWN would be discarded by lv_obj's default KEY handler.
+        // The 425 lineage translated Up/Down in its input-policy pipeline
+        // (FocusTraversalPolicy.cpp); this lineage has no pipeline, so the
+        // translation lives here. LEFT/RIGHT stay raw - the screen-level key
+        // handlers (tab switching, panel navigation) consume them via the
+        // EVENT_BUBBLE substrate.
+        return LV_KEY_PREV;
     case 1:
-        return LV_KEY_DOWN;
+        return LV_KEY_NEXT;
     case 2:
         return LV_KEY_LEFT;
     case 3:

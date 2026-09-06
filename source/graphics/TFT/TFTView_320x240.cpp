@@ -603,8 +603,10 @@ static void addKeyBubbleFlags(lv_obj_t *parent)
  * The 425 lineage's generated styles.c registered focus styles (outline or
  * border in 0x2196f3) on every focusable widget; the regenerated styles.c of
  * this lineage dropped them all, so keypad focus was invisible. One shared
- * runtime style restores the ring - it only renders on the focused object,
- * so applying it to non-focusable widgets is inert.
+ * runtime style restores the ring on the members of every group - exactly
+ * the objects that can hold keypad focus. Containers must not get it:
+ * LV_EVENT_FOCUSED bubbles to the ancestors of the focused widget (see
+ * addKeyBubbleFlags), which puts them into LV_STATE_FOCUS_KEY as well.
  */
 static lv_style_t style_key_focus;
 static bool style_key_focus_ready = false;
@@ -621,12 +623,15 @@ static void applyKeyFocusStyle(lv_obj_t *obj)
     lv_obj_add_style(obj, &style_key_focus, LV_PART_MAIN | LV_STATE_FOCUS_KEY);
 }
 
-static void addKeyFocusStyles(lv_obj_t *parent)
+static void addKeyFocusStyles(void)
 {
-    for (uint32_t i = 0; i < lv_obj_get_child_count(parent); i++) {
-        lv_obj_t *child = lv_obj_get_child(parent, i);
-        applyKeyFocusStyle(child);
-        addKeyFocusStyles(child);
+    uint32_t group_count = lv_group_get_count();
+    for (uint32_t g = 0; g < group_count; g++) {
+        lv_group_t *group = lv_group_by_index(g);
+        uint32_t obj_count = lv_group_get_obj_count(group);
+        for (uint32_t i = 0; i < obj_count; i++) {
+            applyKeyFocusStyle(lv_group_get_obj_by_index(group, i));
+        }
     }
 }
 #endif // SEEED_MESHPAGER_X2
@@ -703,11 +708,21 @@ void TFTView_320x240::apply_hotfix(void)
     addKeyBubbleFlags(objects.calibration_screen);
 
     // restore the keypad focus ring the regenerated styles of this lineage lost
-    addKeyFocusStyles(objects.main_screen);
-    addKeyFocusStyles(objects.boot_screen);
-    addKeyFocusStyles(objects.blank_screen);
-    addKeyFocusStyles(objects.lock_screen);
-    addKeyFocusStyles(objects.calibration_screen);
+    addKeyFocusStyles();
+    // widgets that only join a group later (screen-load handlers, programming mode)
+    applyKeyFocusStyle(objects.blank_screen_button);
+    applyKeyFocusStyle(objects.screen_lock_button_matrix);
+    applyKeyFocusStyle(objects.bluetooth_button);
+
+    // The regenerated home_container carries FOCUSED-state styles that switch its
+    // flex flow from ROW_WRAP to COLUMN (generated/ui_320x240/screens.c:416-419).
+    // FOCUSED bubbles up from the focused status-row button and would re-flow every
+    // row (icon stacked above text) and clip the panel bottom; pin the FOCUSED
+    // selector to the DEFAULT-state values so the state change stays a no-op.
+    lv_obj_set_style_layout(objects.home_container, LV_LAYOUT_FLEX, LV_PART_MAIN | LV_STATE_FOCUSED);
+    lv_obj_set_style_flex_flow(objects.home_container, LV_FLEX_FLOW_ROW_WRAP, LV_PART_MAIN | LV_STATE_FOCUSED);
+    lv_obj_set_style_flex_cross_place(objects.home_container, LV_FLEX_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_FOCUSED);
+    lv_obj_set_style_flex_track_place(objects.home_container, LV_FLEX_ALIGN_START, LV_PART_MAIN | LV_STATE_FOCUSED);
 #endif
 
     // adapt screens to custom display resolution

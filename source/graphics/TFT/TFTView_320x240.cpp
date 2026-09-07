@@ -598,7 +598,7 @@ static void addKeyBubbleFlags(lv_obj_t *parent)
 }
 
 /**
- * @brief keypad focus ring: 3 px Material-blue outline on LV_STATE_FOCUS_KEY
+ * @brief keypad focus ring: 2 px Material-blue border on LV_STATE_FOCUS_KEY
  *
  * The 425 lineage's generated styles.c registered focus styles (outline or
  * border in 0x2196f3) on every focusable widget; the regenerated styles.c of
@@ -607,6 +607,13 @@ static void addKeyBubbleFlags(lv_obj_t *parent)
  * the objects that can hold keypad focus. Containers must not get it:
  * LV_EVENT_FOCUSED bubbles to the ancestors of the focused widget (see
  * addKeyBubbleFlags), which puts them into LV_STATE_FOCUS_KEY as well.
+ *
+ * The ring is a border, not an outline: an outline is drawn outside the
+ * widget and parents clip their children to their own bounds, so edge-hugging
+ * widgets (nav column, panel-flush controls) showed a cut-off ring. A border
+ * is drawn inside the widget and can never be clipped. FULL side is required
+ * because MainButtonStyle's DEFAULT border is RIGHT-only, and the theme's own
+ * FOCUS_KEY outline is zeroed so only the border ring remains.
  */
 static lv_style_t style_key_focus;
 static bool style_key_focus_ready = false;
@@ -615,9 +622,11 @@ static void applyKeyFocusStyle(lv_obj_t *obj)
 {
     if (!style_key_focus_ready) {
         lv_style_init(&style_key_focus);
-        lv_style_set_outline_width(&style_key_focus, 3);
-        lv_style_set_outline_color(&style_key_focus, lv_color_hex(0x2196f3));
-        lv_style_set_outline_opa(&style_key_focus, 180);
+        lv_style_set_border_width(&style_key_focus, 2);
+        lv_style_set_border_color(&style_key_focus, lv_color_hex(0x2196f3));
+        lv_style_set_border_opa(&style_key_focus, 180);
+        lv_style_set_border_side(&style_key_focus, LV_BORDER_SIDE_FULL);
+        lv_style_set_outline_width(&style_key_focus, 0);
         style_key_focus_ready = true;
     }
     lv_obj_add_style(obj, &style_key_focus, LV_PART_MAIN | LV_STATE_FOCUS_KEY);

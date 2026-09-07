@@ -408,6 +408,15 @@ class TFTView_320x240 : public MeshtasticView
     static void ui_event_statistics_table(lv_event_t *e);
     static void ui_event_screen_focus_policy(lv_event_t *e);
 
+#if defined(SEEED_MESHPAGER_X2)
+    // X2 d-pad navigation: chat input/keyboard focus flow and map browse/
+    // controls modes. See the helper block in TFTView_320x240.cpp for how the
+    // keys travel (the CHECKABLE arrow guard there is a file-static handler).
+    static void ui_event_chat_input_key(lv_event_t *e);
+    static void ui_event_keyboard_key(lv_event_t *e);
+    static void ui_event_map_key(lv_event_t *e);
+#endif
+
     static void ui_event_ok(lv_event_t *e);
     static void ui_event_cancel(lv_event_t *e);
     static void ui_event_backup_restore_radio_button(lv_event_t *e);

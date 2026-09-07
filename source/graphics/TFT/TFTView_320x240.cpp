@@ -643,6 +643,195 @@ static void addKeyFocusStyles(void)
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// X2 d-pad traversal semantics (view side)
+//
+// The d-pad driver emits raw LV_KEY_UP/DOWN (see DirectionalPadInputDriver):
+// LVGL's own NEXT/PREV focus movement is bypassed on purpose, because it
+// walks the whole group and cannot be confined to one tab page. Widget
+// classes that consume arrows natively (lv_obj_is_editable: textarea,
+// dropdown, keyboard/buttonmatrix, slider, arc, table) keep their native
+// behavior; for everything else the keys bubble up to the screen-level
+// handlers, which move focus with the helpers below.
+// ---------------------------------------------------------------------------
+
+// tab pages that form a traversal scope: UP/DOWN wrap inside one page and
+// never cross into the sibling page. Filled in apply_hotfix().
+static lv_obj_t *tabPageScopes[] = {nullptr, nullptr, nullptr, nullptr};
+
+static bool objConsumesArrows(lv_obj_t *obj)
+{
+    return lv_obj_is_editable(obj);
+}
+
+// true when "ancestor" is "obj" itself or one of its ancestors (LVGL 9.3 has
+// no lv_obj_is_ancestor helper)
+static bool isAncestor(lv_obj_t *ancestor, lv_obj_t *obj)
+{
+    for (lv_obj_t *a = obj; a; a = lv_obj_get_parent(a)) {
+        if (a == ancestor)
+            return true;
+    }
+    return false;
+}
+
+// combined registration filter: KEY events delivered in the preprocess pass,
+// i.e. before the widget's class handler. The cast is required because C++
+// does not implicitly convert OR-ed enumerators back to the enum type.
+static constexpr lv_event_code_t KEY_PREPROCESS = static_cast<lv_event_code_t>(LV_EVENT_PREPROCESS | LV_EVENT_KEY);
+
+// the object or any of its ancestors is hidden (e.g. another chat's container)
+static bool ancestorHidden(lv_obj_t *obj)
+{
+    for (lv_obj_t *a = obj; a; a = lv_obj_get_parent(a)) {
+        if (lv_obj_has_flag(a, LV_OBJ_FLAG_HIDDEN))
+            return true;
+    }
+    return false;
+}
+
+// nearest enclosing traversal scope: the tab page owning "obj", else the
+// top-level main_screen child that contains it (function panel, settings
+// dialog or map OSD cluster - each forms its own scope).
+static lv_obj_t *scopeOf(lv_obj_t *obj)
+{
+    for (lv_obj_t *page : tabPageScopes) {
+        if (page && isAncestor(page, obj))
+            return page;
+    }
+    lv_obj_t *scope = obj;
+    while (scope && lv_obj_get_parent(scope) != objects.main_screen)
+        scope = lv_obj_get_parent(scope);
+    return scope;
+}
+
+// move keypad focus to the next/previous member of the default input group
+// that lives inside "focused"'s scope, wrapping symmetrically at the edges.
+static bool navigateScope(lv_obj_t *focused, bool next)
+{
+    lv_group_t *group = lv_group_get_default();
+    if (!group || !focused)
+        return false;
+    lv_obj_t *scope = scopeOf(focused);
+    if (!scope)
+        return false;
+
+    uint32_t count = lv_group_get_obj_count(group);
+    uint32_t cur = count;
+    for (uint32_t i = 0; i < count; i++) {
+        if (lv_group_get_obj_by_index(group, i) == focused) {
+            cur = i;
+            break;
+        }
+    }
+    if (cur == count) // focused object is not in the default group
+        return false;
+
+    for (uint32_t step = 1; step <= count; step++) {
+        uint32_t idx = next ? (cur + step) % count : (cur + count - step) % count;
+        lv_obj_t *candidate = lv_group_get_obj_by_index(group, idx);
+        if (candidate == focused)
+            continue;
+        if (isAncestor(scope, candidate) && !ancestorHidden(candidate)) {
+            lv_group_focus_obj(candidate);
+            return true;
+        }
+    }
+    return false;
+}
+
+// focus the first visible group member inside "scope" (after a page switch)
+static void focusFirstInScope(lv_obj_t *scope)
+{
+    lv_group_t *group = lv_group_get_default();
+    if (!group || !scope)
+        return;
+    uint32_t count = lv_group_get_obj_count(group);
+    for (uint32_t i = 0; i < count; i++) {
+        lv_obj_t *candidate = lv_group_get_obj_by_index(group, i);
+        if (isAncestor(scope, candidate) && !ancestorHidden(candidate)) {
+            lv_group_focus_obj(candidate);
+            return;
+        }
+    }
+}
+
+// switch to the neighboring tab of the tabview owning "from" and focus the
+// first member of the new page. Returns false when "from" is not inside one
+// of the known tab pages; true when the key was consumed (at the edges the
+// target is clamped - focus stays, nothing happens).
+static bool switchTabPage(lv_obj_t *from, bool forward)
+{
+    lv_obj_t *page = nullptr;
+    for (lv_obj_t *p : tabPageScopes) {
+        if (p && isAncestor(p, from)) {
+            page = p;
+            break;
+        }
+    }
+    if (!page)
+        return false;
+
+    lv_obj_t *tv = page;
+    while (tv && tv->class_p != &lv_tabview_class)
+        tv = lv_obj_get_parent(tv);
+    if (!tv)
+        return false;
+
+    int32_t tabCount = lv_tabview_get_tab_count(tv);
+    int32_t target = (int32_t)lv_tabview_get_tab_active(tv) + (forward ? 1 : -1);
+    if (target >= 0 && target < tabCount) {
+        lv_tabview_set_active(tv, (uint32_t)target, LV_ANIM_ON);
+        // match the new tab index against the known pages in table order
+        int32_t seen = 0;
+        for (lv_obj_t *p : tabPageScopes) {
+            if (p && isAncestor(tv, p)) {
+                if (seen == target) {
+                    focusFirstInScope(p);
+                    break;
+                }
+                seen++;
+            }
+        }
+    }
+    return true;
+}
+
+// With raw arrow keys, LVGL's built-in arrow-scrolling (SCROLL_WITH_ARROW)
+// would scroll every overflowing scrollable ancestor on each UP/DOWN press
+// (the class handler runs at every bubble level), fighting the focus-follows
+// scrolling (LV_OBJ_FLAG_SCROLL_ON_FOCUS). On X2 arrows mean traversal; list
+// scrolling follows the focus instead. Touch dragging is unaffected.
+static void clearArrowScroll(lv_obj_t *parent)
+{
+    for (uint32_t i = 0; i < lv_obj_get_child_count(parent); i++) {
+        lv_obj_t *child = lv_obj_get_child(parent, i);
+        lv_obj_clear_flag(child, LV_OBJ_FLAG_SCROLL_WITH_ARROW);
+        clearArrowScroll(child);
+    }
+}
+
+static void ui_event_checkable_arrow(lv_event_t *e); // defined with the other X2 key handlers
+static void ui_event_editable_ramp(lv_event_t *e);   // ditto
+
+// tree walk: attach the X2 arrow handlers to every CHECKABLE widget and to
+// the dropdowns/sliders - the lv_obj base class would otherwise toggle
+// checkables on any arrow key, and a closed dropdown opens its list on all
+// four arrows (sliders adjust on all four too), leaving no way to move the
+// focus on.
+static void addArrowKeyGuards(lv_obj_t *parent)
+{
+    for (uint32_t i = 0; i < lv_obj_get_child_count(parent); i++) {
+        lv_obj_t *child = lv_obj_get_child(parent, i);
+        if (lv_obj_has_flag(child, LV_OBJ_FLAG_CHECKABLE)) {
+            lv_obj_add_event_cb(child, ui_event_checkable_arrow, KEY_PREPROCESS, NULL);
+        } else if (child->class_p == &lv_dropdown_class || child->class_p == &lv_slider_class) {
+            lv_obj_add_event_cb(child, ui_event_editable_ramp, KEY_PREPROCESS, NULL);
+        }
+        addArrowKeyGuards(child);
+    }
+}
 #endif // SEEED_MESHPAGER_X2
 
 /**
@@ -662,6 +851,8 @@ void TFTView_320x240::apply_hotfix(void)
         lv_group_add_obj(group, objects.gps_lock_button);
         lv_group_add_obj(group, objects.zoom_in_button);
         lv_group_add_obj(group, objects.zoom_out_button);
+        // browse-mode focus holder for the two-mode map control (ui_event_map_key)
+        lv_group_add_obj(group, objects.map_panel);
     }
 
     // for keyboard control: main menu buttons are moved into own group
@@ -699,9 +890,34 @@ void TFTView_320x240::apply_hotfix(void)
     lv_obj_add_event_cb(objects.lock_screen, ui_event_screen_focus_policy, LV_EVENT_SCREEN_LOAD_START, NULL);
     lv_obj_add_event_cb(objects.calibration_screen, ui_event_screen_focus_policy, LV_EVENT_SCREEN_LOAD_START, NULL);
 
-    // capture tabview keys and forward them to the screen key handler
+    // capture tabview keys: LEFT/RIGHT switch pages, RETURN falls through to
+    // the screen key handler
     lv_obj_add_event_cb(objects.tab_page_filter, ui_event_tab_page, LV_EVENT_KEY, NULL);
     lv_obj_add_event_cb(objects.tab_page_highlight, ui_event_tab_page, LV_EVENT_KEY, NULL);
+    lv_obj_add_event_cb(objects.tab_page_basic_settings, ui_event_tab_page, LV_EVENT_KEY, NULL);
+    lv_obj_add_event_cb(objects.tab_page_tools, ui_event_tab_page, LV_EVENT_KEY, NULL);
+
+    // traversal scopes: UP/DOWN wrap inside one tab page, never across pages
+    tabPageScopes[0] = objects.tab_page_filter;
+    tabPageScopes[1] = objects.tab_page_highlight;
+    tabPageScopes[2] = objects.tab_page_basic_settings;
+    tabPageScopes[3] = objects.tab_page_tools;
+
+    // arrow guards: checkables must not toggle on arrows, closed dropdowns
+    // and sliders must not trap the focus (see addArrowKeyGuards). PREPROCESS
+    // runs before the class handler.
+    addArrowKeyGuards(objects.main_screen);
+
+    // chat focus flow: DOWN opens the keyboard, RETURN closes it
+    lv_obj_add_event_cb(objects.message_input_area, ui_event_chat_input_key, KEY_PREPROCESS, NULL);
+    lv_obj_add_event_cb(objects.keyboard, ui_event_keyboard_key, KEY_PREPROCESS, NULL);
+
+    // map two-mode keypad control (browse / controls)
+    lv_obj_add_event_cb(objects.map_panel, ui_event_map_key, LV_EVENT_KEY, NULL);
+
+    // the hidden boot logo arc auto-joins the default group and would be an
+    // invisible focus stop
+    lv_group_remove_obj(objects.boot_logo_arc);
 
     // remove signal scanner sliders from the focus group
     lv_group_remove_obj(objects.rssi_slider);
@@ -716,12 +932,17 @@ void TFTView_320x240::apply_hotfix(void)
     addKeyBubbleFlags(objects.lock_screen);
     addKeyBubbleFlags(objects.calibration_screen);
 
+    // arrows must not scroll overflowing panels - traversal + focus-follows
+    // (SCROLL_ON_FOCUS) own the scrolling on X2
+    clearArrowScroll(objects.main_screen);
+
     // restore the keypad focus ring the regenerated styles of this lineage lost
     addKeyFocusStyles();
     // widgets that only join a group later (screen-load handlers, programming mode)
     applyKeyFocusStyle(objects.blank_screen_button);
     applyKeyFocusStyle(objects.screen_lock_button_matrix);
     applyKeyFocusStyle(objects.bluetooth_button);
+    applyKeyFocusStyle(objects.map_panel);
 
     // The regenerated home_container carries FOCUSED-state styles that switch its
     // flex flow from ROW_WRAP to COLUMN (generated/ui_320x240/screens.c:416-419).
@@ -1151,7 +1372,8 @@ void TDeckGUI::ui_event_HomeButton(lv_event_t * e) {
 
 #if defined(SEEED_MESHPAGER_X2)
 /**
- * Handle ESC, back, and left to move focus to main buttons group
+ * Screen-level key handler (bubble endpoint): raw UP/DOWN do scoped focus
+ * traversal, RETURN leaves the active panel for the main buttons group
  */
 void TFTView_320x240::ui_event_ScreenKey(lv_event_t *e)
 {
@@ -1176,20 +1398,32 @@ void TFTView_320x240::ui_event_ScreenKey(lv_event_t *e)
             }
         }
 
-        if ((c == LV_KEY_LEFT || c == LV_KEY_BACKSPACE) &&
-            (THIS->activeSettings != eNone || THIS->activePanel == objects.node_options_panel ||
-             !lv_obj_has_flag(objects.map_osd_panel, LV_OBJ_FLAG_HIDDEN))) {
-            // we're in a settings/options/osd dialog
+        // Scoped focus traversal: raw UP/DOWN from the d-pad. Widgets whose
+        // class consumes arrows natively have already handled them; a one-line
+        // textarea's native up/down only snaps the cursor to the start/end,
+        // so it traverses as well. Dialogs and the map OSD cluster form their
+        // own scope (they are top-level main_screen children, see scopeOf).
+        if (c == LV_KEY_UP || c == LV_KEY_DOWN) {
+            lv_obj_t *target = lv_event_get_target_obj(e);
+            bool native = target && objConsumesArrows(target) &&
+                          !(target->class_p == &lv_textarea_class && lv_textarea_get_one_line(target));
+            if (!native) {
+                navigateScope(target, c == LV_KEY_DOWN);
+                lv_event_stop_processing(e);
+            }
             return;
         }
 
-        // Handle ESC/LEFT to return to main menu from any right panel.
-        // TODO: Check for devices that have only a backspace key
-        if (c == LV_KEY_ESC || c == LV_KEY_LEFT) {
+        // RETURN is the only key that returns to the left nav bar. ui_set_active()
+        // is the only place panels get hidden, so reactivate home first - its
+        // X2 tail rebinds defaultPanelGroup, which the mainButtons binding
+        // right after overrides.
+        if (c == LV_KEY_ESC) {
             // Clean up any overlays (keyboard, QR code, popups, settings dialogs) before returning to menu
             THIS->cleanupAllOverlays();
-            THIS->setInputGroup(groups.mainButtons);
             lv_obj_t *target = THIS->lastMainButton ? THIS->lastMainButton : objects.home_button;
+            THIS->ui_set_active(target, objects.home_panel, objects.top_panel);
+            THIS->setInputGroup(groups.mainButtons);
             lv_group_focus_obj(target);
             lv_event_stop_processing(e); // Stop propagation so panel buttons don't see it
             return;
@@ -1200,11 +1434,19 @@ void TFTView_320x240::ui_event_ScreenKey(lv_event_t *e)
     }
 }
 
-// capture tabview keys
+// tabview pages: LEFT/RIGHT switch to the neighboring page (unless the
+// focused widget uses them natively - textarea cursor, open dropdown, ...),
+// RETURN falls through to the screen-level back navigation.
 void TFTView_320x240::ui_event_tab_page(lv_event_t *e)
 {
     uint32_t key = lv_event_get_key(e);
-    if (key == LV_KEY_LEFT || key == LV_KEY_RIGHT || key == LV_KEY_ESC) {
+    if (key == LV_KEY_LEFT || key == LV_KEY_RIGHT) {
+        lv_obj_t *target = lv_event_get_target_obj(e);
+        if (!objConsumesArrows(target) && !lv_obj_has_flag(target, LV_OBJ_FLAG_CHECKABLE)) {
+            if (switchTabPage(target, key == LV_KEY_RIGHT))
+                lv_event_stop_processing(e);
+        }
+    } else if (key == LV_KEY_ESC) {
         lv_event_stop_processing(e);
         lv_obj_send_event(objects.main_screen, LV_EVENT_KEY, lv_event_get_param(e));
     }
@@ -1239,6 +1481,18 @@ void TFTView_320x240::ui_event_screen_focus_policy(lv_event_t *e)
 
     applyButtonPolicy(objects.blank_screen_button, screen == objects.blank_screen);
     applyButtonPolicy(objects.screen_lock_button_matrix, screen == objects.lock_screen);
+
+    // these screens' only control was just (re)added to mainButtons - bind the
+    // keypad to that group right away and put the focus on it, or the indev
+    // would silently drop all keys / act on an invisible nav button
+    // (lock-screen PIN entry was dead)
+    if (screen == objects.blank_screen) {
+        THIS->setInputGroup(groups.mainButtons);
+        lv_group_focus_obj(objects.blank_screen_button);
+    } else if (screen == objects.lock_screen) {
+        THIS->setInputGroup(groups.mainButtons);
+        lv_group_focus_obj(objects.screen_lock_button_matrix);
+    }
 }
 
 void TFTView_320x240::ui_event_ButtonPanel(lv_event_t *e)
@@ -1263,30 +1517,156 @@ void TFTView_320x240::ui_event_ButtonPanel(lv_event_t *e)
             lv_event_stop_processing(e);
             break;
         }
-        case LV_KEY_LEFT: {
-            // use left key in main menu also as long press
-            if (THIS->activeSettings == eNone) {
-                lv_obj_send_event(lv_event_get_target_obj(e), LV_EVENT_LONG_PRESSED, nullptr);
-                lv_event_stop_processing(e);
-            }
-            break;
-        }
-        case LV_KEY_RIGHT: {
-            // move to visible object on right pane; restore the last focused object in the panel group
-            lv_obj_t *lastFocused = lv_group_get_focused(THIS->defaultPanelGroup);
-            THIS->setInputGroup(THIS->defaultPanelGroup);
-            if (lastFocused)
-                lv_group_focus_obj(lastFocused);
+        case LV_KEY_UP:
+            lv_group_focus_prev(groups.mainButtons);
             lv_event_stop_processing(e);
             break;
-        }
-        case LV_KEY_UP:
-            break;
         case LV_KEY_DOWN:
+            lv_group_focus_next(groups.mainButtons);
+            lv_event_stop_processing(e);
             break;
         default:
             break;
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// X2 d-pad: CHECKABLE arrow guard
+//
+// The lv_obj base class toggles CHECKABLE widgets (switches, checkboxes) on
+// any arrow key (lv_obj.c), which both traps the focus and lets UP/DOWN
+// "selection" flip settings by accident. This PREPROCESS callback runs
+// before the class handler and routes the arrows into traversal / tab
+// switching instead. LEFT/RIGHT outside tab pages fall through: the base
+// class keeps its native directional toggle (RIGHT checks, LEFT unchecks).
+// ---------------------------------------------------------------------------
+static void ui_event_checkable_arrow(lv_event_t *e)
+{
+    uint32_t key = lv_event_get_key(e);
+    lv_obj_t *target = lv_event_get_target_obj(e);
+    if (key == LV_KEY_UP || key == LV_KEY_DOWN) {
+        navigateScope(target, key == LV_KEY_DOWN);
+        lv_event_stop_processing(e); // arrows must never toggle the widget
+    } else if (key == LV_KEY_LEFT || key == LV_KEY_RIGHT) {
+        if (switchTabPage(target, key == LV_KEY_RIGHT))
+            lv_event_stop_processing(e); // keep the base class from toggling
+    }
+}
+
+// X2: traversal off-ramp for dropdowns and sliders (PREPROCESS, before the
+// class handler). A closed dropdown opens its list on all four arrows and a
+// slider adjusts on all four, so without this the focus would be trapped:
+// UP/DOWN traverse instead (a dropdown with its list open keeps the native
+// option selection), LEFT/RIGHT on a dropdown switch tab pages when inside
+// one, and a slider keeps LEFT/RIGHT for adjustment.
+static void ui_event_editable_ramp(lv_event_t *e)
+{
+    uint32_t key = lv_event_get_key(e);
+    if (key != LV_KEY_UP && key != LV_KEY_DOWN && key != LV_KEY_LEFT && key != LV_KEY_RIGHT)
+        return;
+    lv_obj_t *target = lv_event_get_target_obj(e);
+    if (target->class_p == &lv_dropdown_class) {
+        if (lv_dropdown_get_list(target))
+            return; // list is open: native option selection
+        if (key == LV_KEY_UP || key == LV_KEY_DOWN) {
+            if (navigateScope(target, key == LV_KEY_DOWN))
+                lv_event_stop_processing(e);
+        } else if (switchTabPage(target, key == LV_KEY_RIGHT)) {
+            lv_event_stop_processing(e);
+        }
+    } else if (target->class_p == &lv_slider_class) {
+        if (key == LV_KEY_UP || key == LV_KEY_DOWN) {
+            if (navigateScope(target, key == LV_KEY_DOWN))
+                lv_event_stop_processing(e);
+        }
+    }
+}
+
+// X2 chat focus flow (on the one-line input): DOWN drops onto the keyboard,
+// RETURN closes it again. PREPROCESS keeps the textarea class from treating
+// the keys as input - its fallback inserts any unhandled key as a character.
+void TFTView_320x240::ui_event_chat_input_key(lv_event_t *e)
+{
+    uint32_t key = lv_event_get_key(e);
+    bool keyboardVisible = !lv_obj_has_flag(objects.keyboard, LV_OBJ_FLAG_HIDDEN);
+    if (keyboardVisible && key == LV_KEY_DOWN) {
+        lv_group_focus_obj(objects.keyboard);
+        lv_event_stop_processing(e);
+    } else if (keyboardVisible && key == LV_KEY_ESC) {
+        THIS->hideKeyboard(objects.messages_panel);
+        lv_group_focus_obj(objects.message_input_area);
+        lv_event_stop_processing(e);
+    } else if (key == LV_KEY_ESC) {
+        // keyboard hidden: keep the textarea class from inserting the ESC byte
+        // as a character (its KEY fallback does that for unhandled keys), and
+        // forward the key straight to the screen handler for the back navigation
+        lv_event_stop_processing(e);
+        lv_obj_send_event(objects.main_screen, LV_EVENT_KEY, lv_event_get_param(e));
+    }
+    // keyboard hidden: UP/DOWN bubble on and traverse the panel (a one-line
+    // textarea's native up/down only snaps the cursor, so nothing is lost)
+}
+
+// X2: on the keyboard, RETURN goes back to the input line.
+void TFTView_320x240::ui_event_keyboard_key(lv_event_t *e)
+{
+    if (lv_event_get_key(e) == LV_KEY_ESC) {
+        lv_group_focus_obj(objects.message_input_area);
+        lv_event_stop_processing(e);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// X2 map two-mode keypad control. Browse mode: map_panel itself holds focus
+// and the d-pad pans the map through the same map->scroll() path the on-
+// screen arrow buttons use (the map is not an LVGL-scrollable object).
+// CONFIRM hands focus to the control cluster (nav/zoom/gps buttons), where
+// scoped traversal picks a control and CONFIRM activates it; RETURN climbs
+// back out: controls -> browse -> (bubbles on to ui_event_ScreenKey) nav bar.
+// ---------------------------------------------------------------------------
+void TFTView_320x240::ui_event_map_key(lv_event_t *e)
+{
+    if (lv_event_get_code(e) != LV_EVENT_KEY)
+        return;
+    uint32_t key = lv_event_get_key(e);
+    lv_obj_t *target = lv_event_get_target_obj(e);
+
+    if (target == objects.map_panel) {
+        int16_t deltaX = 0, deltaY = 0;
+        switch (key) {
+        case LV_KEY_UP:
+            deltaY = 1;
+            break;
+        case LV_KEY_DOWN:
+            deltaY = -1;
+            break;
+        case LV_KEY_LEFT:
+            deltaX = 1;
+            break;
+        case LV_KEY_RIGHT:
+            deltaX = -1;
+            break;
+        case LV_KEY_ENTER:
+            lv_group_focus_obj(objects.nav_button); // enter the control cluster
+            lv_event_stop_processing(e);
+            return;
+        default:
+            return; // RETURN bubbles on to ui_event_ScreenKey (back to the nav bar)
+        }
+        if (THIS->map && THIS->map->redrawComplete()) {
+            if (!THIS->map->scroll(deltaX, deltaY))
+                THIS->map->forceRedraw();
+            THIS->updateLocationMap(THIS->map->getObjectsOnMap());
+        }
+        lv_event_stop_processing(e);
+    } else if (key == LV_KEY_ESC) {
+        // descendant ESC: close the map OSD overlay (brightness/contrast) if
+        // focus is inside it, then leave the controls for map browsing
+        if (!lv_obj_has_flag(objects.map_osd_panel, LV_OBJ_FLAG_HIDDEN) && isAncestor(objects.map_osd_panel, target))
+            lv_obj_add_flag(objects.map_osd_panel, LV_OBJ_FLAG_HIDDEN);
+        lv_group_focus_obj(objects.map_panel);
+        lv_event_stop_processing(e);
     }
 }
 #endif // SEEED_MESHPAGER_X2
@@ -2101,7 +2481,25 @@ void TFTView_320x240::ui_event_message_ready(lv_event_t *e)
                 if (!lv_obj_has_flag(objects.keyboard, LV_OBJ_FLAG_HIDDEN)) {
                     THIS->hideKeyboard(objects.messages_panel);
                 }
+#if defined(SEEED_MESHPAGER_X2)
+                // after sending, land in the message list so UP/DOWN can browse
+                // the history: focus the label of the newest bubble
+                lv_obj_t *bubble = NULL;
+                uint32_t cnt = THIS->activeMsgContainer ? lv_obj_get_child_count(THIS->activeMsgContainer) : 0;
+                if (cnt)
+                    bubble = lv_obj_get_child(THIS->activeMsgContainer, cnt - 1);
+                lv_obj_t *msgLabel = NULL;
+                for (uint32_t i = 0; bubble && i < lv_obj_get_child_count(bubble); i++) {
+                    lv_obj_t *ch = lv_obj_get_child(bubble, i);
+                    if (ch->class_p == &lv_label_class) {
+                        msgLabel = ch;
+                        break;
+                    }
+                }
+                lv_group_focus_obj(msgLabel ? msgLabel : objects.message_input_area);
+#else
                 lv_group_focus_obj(objects.message_input_area);
+#endif
             }
         }
     }
@@ -6965,6 +7363,7 @@ lv_obj_t *TFTView_320x240::newMessageContainer(uint32_t from, uint32_t to, uint8
 #if defined(SEEED_MESHPAGER_X2)
     lv_obj_add_flag(container, LV_OBJ_FLAG_EVENT_BUBBLE);
     applyKeyFocusStyle(container);
+    lv_obj_clear_flag(container, LV_OBJ_FLAG_SCROLL_WITH_ARROW); // arrows traverse; focus-follows scrolls (see clearArrowScroll)
 #endif
     lv_obj_clear_flag(container, lv_obj_flag_t(LV_OBJ_FLAG_PRESS_LOCK | LV_OBJ_FLAG_CLICK_FOCUSABLE | LV_OBJ_FLAG_GESTURE_BUBBLE |
                                                LV_OBJ_FLAG_SNAPPABLE | LV_OBJ_FLAG_SCROLL_ELASTIC)); /// Flags
@@ -7576,9 +7975,17 @@ void TFTView_320x240::setGroupFocus(lv_obj_t *panel)
         if (chats.size() > 0) {
             lv_group_focus_obj(panel->spec_attr->children[1]); // TODO: does not work
         }
+    } else if (panel == objects.node_options_panel) {
+#if defined(SEEED_MESHPAGER_X2)
+        // the panel's only child is the tabview; land focus on the first row
+        // of the filter page instead of leaving it on the previous screen's
+        // (now hidden) widget
+        focusFirstInScope(objects.tab_page_filter);
+#endif
     } else if (panel == objects.map_panel) {
 #if defined(SEEED_MESHPAGER_X2)
-        lv_group_focus_obj(objects.nav_button);
+        // enter the map in browse mode: map_panel holds focus and the d-pad pans
+        lv_group_focus_obj(objects.map_panel);
 #endif
     } else if (panel == objects.settings_screen_lock_panel) {
         lv_group_focus_obj(objects.screen_lock_button_matrix);

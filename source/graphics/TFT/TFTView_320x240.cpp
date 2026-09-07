@@ -692,7 +692,7 @@ static bool ancestorHidden(lv_obj_t *obj)
 }
 
 // nearest enclosing traversal scope: the tab page owning "obj", else the
-// top-level main_screen child that contains it (function panel, settings
+// top-level child of the object's own screen (function panel, settings
 // dialog or map OSD cluster - each forms its own scope).
 static lv_obj_t *scopeOf(lv_obj_t *obj)
 {
@@ -701,19 +701,27 @@ static lv_obj_t *scopeOf(lv_obj_t *obj)
             return page;
     }
     lv_obj_t *scope = obj;
-    while (scope && lv_obj_get_parent(scope) != objects.main_screen)
+    while (scope && lv_obj_get_parent(scope) && lv_obj_get_parent(lv_obj_get_parent(scope)))
         scope = lv_obj_get_parent(scope);
     return scope;
 }
 
+// one-shot: set while a dropdown's class handler is consuming an ESC to
+// close its open list, so the screen key handler swallows that same key
+// instead of also navigating back.
+static lv_obj_t *dropdownEscSource = NULL;
+
 // move keypad focus to the next/previous member of the default input group
 // that lives inside "focused"'s scope, wrapping symmetrically at the edges.
-static bool navigateScope(lv_obj_t *focused, bool next)
+// "scope_override" confines the walk to a sub-scope of the panel (the chat
+// message container: UP/DOWN browse bubbles without dropping onto the input
+// line / keyboard toggle pair).
+static bool navigateScope(lv_obj_t *focused, bool next, lv_obj_t *scope_override = NULL)
 {
     lv_group_t *group = lv_group_get_default();
     if (!group || !focused)
         return false;
-    lv_obj_t *scope = scopeOf(focused);
+    lv_obj_t *scope = scope_override ? scope_override : scopeOf(focused);
     if (!scope)
         return false;
 
@@ -908,8 +916,10 @@ void TFTView_320x240::apply_hotfix(void)
     // runs before the class handler.
     addArrowKeyGuards(objects.main_screen);
 
-    // chat focus flow: DOWN opens the keyboard, RETURN closes it
+    // chat focus flow: LEFT/RIGHT pair the input line with the keyboard
+    // toggle, UP/DOWN browse the history, RETURN climbs down level by level
     lv_obj_add_event_cb(objects.message_input_area, ui_event_chat_input_key, KEY_PREPROCESS, NULL);
+    lv_obj_add_event_cb(objects.keyboard_button_0, ui_event_keyboard_button_key, KEY_PREPROCESS, NULL);
     lv_obj_add_event_cb(objects.keyboard, ui_event_keyboard_key, KEY_PREPROCESS, NULL);
 
     // map two-mode keypad control (browse / controls)
@@ -1385,6 +1395,12 @@ void TFTView_320x240::ui_event_ScreenKey(lv_event_t *e)
 
         uint32_t c = *(const uint32_t *)param;
         if (c == LV_KEY_ESC) {
+            // an ESC that just closed an open dropdown list does not also
+            // navigate back
+            if (dropdownEscSource) {
+                dropdownEscSource = NULL;
+                return;
+            }
             // leave reboot screen
             if (THIS->activeSettings == eReboot) {
                 lv_obj_send_event(objects.cancel_reboot_button, LV_EVENT_CLICKED, nullptr);
@@ -1402,29 +1418,56 @@ void TFTView_320x240::ui_event_ScreenKey(lv_event_t *e)
         // class consumes arrows natively have already handled them; a one-line
         // textarea's native up/down only snaps the cursor to the start/end,
         // so it traverses as well. Dialogs and the map OSD cluster form their
-        // own scope (they are top-level main_screen children, see scopeOf).
+        // own scope (top-level children of the object's screen, see scopeOf).
         if (c == LV_KEY_UP || c == LV_KEY_DOWN) {
             lv_obj_t *target = lv_event_get_target_obj(e);
             bool native = target && objConsumesArrows(target) &&
                           !(target->class_p == &lv_textarea_class && lv_textarea_get_one_line(target));
             if (!native) {
-                navigateScope(target, c == LV_KEY_DOWN);
+                // inside a chat, UP/DOWN browse only the message bubbles: the
+                // input line / keyboard toggle pair is a LEFT/RIGHT domain
+                lv_obj_t *chatScope = (target && THIS->activeMsgContainer &&
+                                       isAncestor(THIS->activeMsgContainer, target))
+                                          ? THIS->activeMsgContainer
+                                          : NULL;
+                navigateScope(target, c == LV_KEY_DOWN, chatScope);
                 lv_event_stop_processing(e);
             }
             return;
         }
 
-        // RETURN is the only key that returns to the left nav bar. ui_set_active()
-        // is the only place panels get hidden, so reactivate home first - its
-        // X2 tail rebinds defaultPanelGroup, which the mainButtons binding
-        // right after overrides.
+        // LEFT/RIGHT: inside a chat they hop from the message area down to
+        // the input line (input line <-> keyboard toggle switching lives
+        // there); in the reboot dialog they walk its row of icon buttons.
+        if (c == LV_KEY_LEFT || c == LV_KEY_RIGHT) {
+            lv_obj_t *target = lv_event_get_target_obj(e);
+            if (target && THIS->activeMsgContainer && isAncestor(THIS->activeMsgContainer, target)) {
+                lv_group_focus_obj(objects.message_input_area);
+                lv_event_stop_processing(e);
+            } else if (target && THIS->activeSettings == eReboot) {
+                navigateScope(target, c == LV_KEY_RIGHT);
+                lv_event_stop_processing(e);
+            }
+            return;
+        }
+
+        // RETURN climbs down one level: an open conversation goes back to
+        // the chat list; any other panel keeps its view, focus goes to the
+        // nav bar
         if (c == LV_KEY_ESC) {
             // Clean up any overlays (keyboard, QR code, popups, settings dialogs) before returning to menu
             THIS->cleanupAllOverlays();
-            lv_obj_t *target = THIS->lastMainButton ? THIS->lastMainButton : objects.home_button;
-            THIS->ui_set_active(target, objects.home_panel, objects.top_panel);
-            THIS->setInputGroup(groups.mainButtons);
-            lv_group_focus_obj(target);
+            if (THIS->activePanel == objects.messages_panel) {
+                // conversation -> chat list; the explicit focus must run
+                // after ui_set_active's own tail focus
+                THIS->ui_set_active(objects.messages_button, objects.chats_panel, objects.top_chats_panel);
+                focusFirstInScope(objects.chats_panel);
+            } else {
+                if (THIS->activePanel == objects.node_options_panel)
+                    THIS->storeNodeOptions(); // the ui_set_active save hook no longer runs
+                THIS->setInputGroup(groups.mainButtons);
+                lv_group_focus_obj(THIS->lastMainButton ? THIS->lastMainButton : objects.home_button);
+            }
             lv_event_stop_processing(e); // Stop propagation so panel buttons don't see it
             return;
         }
@@ -1563,11 +1606,18 @@ static void ui_event_checkable_arrow(lv_event_t *e)
 static void ui_event_editable_ramp(lv_event_t *e)
 {
     uint32_t key = lv_event_get_key(e);
+    lv_obj_t *target = lv_event_get_target_obj(e);
+    if (key == LV_KEY_ESC) {
+        // an open dropdown list consumes ESC itself (class handler below);
+        // arm the flag so the screen key handler does not also navigate back
+        if (target->class_p == &lv_dropdown_class && lv_dropdown_is_open(target))
+            dropdownEscSource = target;
+        return;
+    }
     if (key != LV_KEY_UP && key != LV_KEY_DOWN && key != LV_KEY_LEFT && key != LV_KEY_RIGHT)
         return;
-    lv_obj_t *target = lv_event_get_target_obj(e);
     if (target->class_p == &lv_dropdown_class) {
-        if (lv_dropdown_get_list(target))
+        if (lv_dropdown_is_open(target))
             return; // list is open: native option selection
         if (key == LV_KEY_UP || key == LV_KEY_DOWN) {
             if (navigateScope(target, key == LV_KEY_DOWN))
@@ -1583,9 +1633,40 @@ static void ui_event_editable_ramp(lv_event_t *e)
     }
 }
 
-// X2 chat focus flow (on the one-line input): DOWN drops onto the keyboard,
-// RETURN closes it again. PREPROCESS keeps the textarea class from treating
-// the keys as input - its fallback inserts any unhandled key as a character.
+// X2 chat: put the focus on the newest bubble's label so UP/DOWN can browse
+// the history (an empty chat falls back to the input line - nothing to read).
+void TFTView_320x240::focusLastMessageBubble(void)
+{
+    lv_obj_t *msgLabel = NULL;
+    uint32_t cnt = THIS->activeMsgContainer ? lv_obj_get_child_count(THIS->activeMsgContainer) : 0;
+    if (cnt) {
+        lv_obj_t *bubble = lv_obj_get_child(THIS->activeMsgContainer, cnt - 1);
+        for (uint32_t i = 0; bubble && i < lv_obj_get_child_count(bubble); i++) {
+            lv_obj_t *ch = lv_obj_get_child(bubble, i);
+            if (ch->class_p == &lv_label_class) {
+                msgLabel = ch;
+                break;
+            }
+        }
+    }
+    lv_group_focus_obj(msgLabel ? msgLabel : objects.message_input_area);
+}
+
+// X2: hide the keyboard at once (no slide-out tail) and refocus its
+// associated textarea - the chat input line or a settings dialog's field.
+void TFTView_320x240::closeKeyboardFocusInput(void)
+{
+    lv_obj_add_flag(objects.keyboard, LV_OBJ_FLAG_HIDDEN);
+    THIS->hideKeyboard(THIS->activePanel);
+    lv_obj_t *ta = lv_keyboard_get_textarea(objects.keyboard);
+    lv_group_focus_obj(ta ? ta : objects.message_input_area);
+}
+
+// X2 chat focus flow (on the one-line input): LEFT/RIGHT pair with the
+// keyboard toggle button, UP/DOWN/RETURN land in the message area, RETURN
+// with the keyboard open closes it (DOWN refocuses a visible keyboard).
+// PREPROCESS keeps the textarea class from inserting unhandled keys as
+// characters.
 void TFTView_320x240::ui_event_chat_input_key(lv_event_t *e)
 {
     uint32_t key = lv_event_get_key(e);
@@ -1594,25 +1675,42 @@ void TFTView_320x240::ui_event_chat_input_key(lv_event_t *e)
         lv_group_focus_obj(objects.keyboard);
         lv_event_stop_processing(e);
     } else if (keyboardVisible && key == LV_KEY_ESC) {
-        THIS->hideKeyboard(objects.messages_panel);
-        lv_group_focus_obj(objects.message_input_area);
+        closeKeyboardFocusInput();
         lv_event_stop_processing(e);
-    } else if (key == LV_KEY_ESC) {
-        // keyboard hidden: keep the textarea class from inserting the ESC byte
-        // as a character (its KEY fallback does that for unhandled keys), and
-        // forward the key straight to the screen handler for the back navigation
+    } else if (key == LV_KEY_RIGHT) {
+        // the input line is the left end of the input-domain pair
+        lv_group_focus_obj(objects.keyboard_button_0);
         lv_event_stop_processing(e);
-        lv_obj_send_event(objects.main_screen, LV_EVENT_KEY, lv_event_get_param(e));
+    } else if (key == LV_KEY_LEFT) {
+        lv_event_stop_processing(e); // nothing left of the input line
+    } else if (key == LV_KEY_UP || key == LV_KEY_DOWN || key == LV_KEY_ESC) {
+        // browse the chat history / climb down a level (input -> messages)
+        focusLastMessageBubble();
+        lv_event_stop_processing(e);
     }
-    // keyboard hidden: UP/DOWN bubble on and traverse the panel (a one-line
-    // textarea's native up/down only snaps the cursor, so nothing is lost)
 }
 
-// X2: on the keyboard, RETURN goes back to the input line.
+// X2: on the keyboard, RETURN closes it and goes back to the input line.
 void TFTView_320x240::ui_event_keyboard_key(lv_event_t *e)
 {
     if (lv_event_get_key(e) == LV_KEY_ESC) {
+        closeKeyboardFocusInput();
+        lv_event_stop_processing(e);
+    }
+}
+
+// X2: the right end of the chat input pair - LEFT goes back to the input
+// line, UP/DOWN/RETURN land in the message area; ENTER opens the keyboard.
+void TFTView_320x240::ui_event_keyboard_button_key(lv_event_t *e)
+{
+    uint32_t key = lv_event_get_key(e);
+    if (key == LV_KEY_LEFT) {
         lv_group_focus_obj(objects.message_input_area);
+        lv_event_stop_processing(e);
+    } else if (key == LV_KEY_RIGHT) {
+        lv_event_stop_processing(e); // nothing right of the toggle
+    } else if (key == LV_KEY_UP || key == LV_KEY_DOWN || key == LV_KEY_ESC) {
+        focusLastMessageBubble();
         lv_event_stop_processing(e);
     }
 }
@@ -1648,6 +1746,9 @@ void TFTView_320x240::ui_event_map_key(lv_event_t *e)
             deltaX = -1;
             break;
         case LV_KEY_ENTER:
+            // swallow this press's release first: it would CLICK the
+            // freshly focused nav button (phantom "go home")
+            lv_indev_wait_release(lv_indev_get_act());
             lv_group_focus_obj(objects.nav_button); // enter the control cluster
             lv_event_stop_processing(e);
             return;
@@ -1785,7 +1886,14 @@ void TFTView_320x240::ui_event_NodesButton(lv_event_t *e)
         }
     } else if (event_code == LV_EVENT_LONG_PRESSED) {
         filterNeedsUpdate = true;
+#if defined(SEEED_MESHPAGER_X2)
+        // keypad: swallow the release and clear the pressed state (the
+        // focus move below happens mid-press)
+        lv_indev_wait_release(lv_indev_get_act());
+        lv_obj_remove_state(lv_event_get_target_obj(e), LV_STATE_PRESSED);
+#else
         ignoreClicked = true;
+#endif
         THIS->ui_set_active(objects.nodes_button, objects.node_options_panel, objects.top_node_options_panel);
     }
 }
@@ -1848,8 +1956,15 @@ void TFTView_320x240::ui_event_NodeButton(lv_event_t *e)
         //  set color and text of clicked node
         uint32_t nodeNum = (unsigned long)e->user_data;
         bool isMessagable = !((unsigned long)(THIS->nodes[nodeNum]->LV_OBJ_IDX(node_img_idx)->user_data) == eRole::unmessagable);
-        if (nodeNum != THIS->ownNode && isMessagable)
+        if (nodeNum != THIS->ownNode && isMessagable) {
+#if defined(SEEED_MESHPAGER_X2)
+            // keypad: swallow the release and clear the pressed state (the
+            // panel switch below happens mid-press)
+            lv_indev_wait_release(lv_indev_get_act());
+            lv_obj_remove_state(lv_event_get_target_obj(e), LV_STATE_PRESSED);
+#endif
             THIS->showMessages(nodeNum);
+        }
     }
 }
 
@@ -1923,6 +2038,9 @@ void TFTView_320x240::ui_event_MapButton(lv_event_t *e)
                 lv_obj_clear_flag(objects.zoom_out_button, LV_OBJ_FLAG_HIDDEN);
                 lv_obj_clear_flag(objects.navigation_panel, LV_OBJ_FLAG_HIDDEN);
 #if defined(SEEED_MESHPAGER_X2)
+                // rebind the d-pad to the controls (same as the long-press
+                // branch below)
+                THIS->setInputGroup(THIS->defaultPanelGroup);
                 lv_group_focus_obj(objects.nav_button);
 #endif
             } else {
@@ -1941,10 +2059,15 @@ void TFTView_320x240::ui_event_MapButton(lv_event_t *e)
     } else if (event_code == LV_EVENT_LONG_PRESSED && THIS->activeSettings == eNone) {
         lv_obj_clear_flag(objects.map_osd_panel, LV_OBJ_FLAG_HIDDEN);
 #if defined(SEEED_MESHPAGER_X2)
+        // keypad: swallow the release and clear the pressed state (the
+        // focus move below happens mid-press)
+        lv_indev_wait_release(lv_indev_get_act());
+        lv_obj_remove_state(lv_event_get_target_obj(e), LV_STATE_PRESSED);
         THIS->setInputGroup(THIS->defaultPanelGroup);
         lv_group_focus_obj(objects.map_brightness_slider);
-#endif
+#else
         ignoreClicked = true;
+#endif
     }
 }
 
@@ -1971,6 +2094,12 @@ void TFTView_320x240::ui_event_SettingsButton(lv_event_t *e)
         screenUnlockRequest = false;
         ignoreClicked = true;
     } else if (event_code == LV_EVENT_LONG_PRESSED && advancedMode && THIS->activeSettings == eNone) {
+#if defined(SEEED_MESHPAGER_X2)
+        // keypad: swallow the release and clear the pressed state (the
+        // panel switch below happens mid-press)
+        lv_indev_wait_release(lv_indev_get_act());
+        lv_obj_remove_state(lv_event_get_target_obj(e), LV_STATE_PRESSED);
+#endif
         advancedMode = !advancedMode;
         THIS->ui_set_active(objects.settings_button, ui_AdvancedSettingsPanel, objects.top_advanced_settings_panel);
     }
@@ -2107,10 +2236,18 @@ void TFTView_320x240::ui_event_OnlineNodesButton(lv_event_t *e)
         lv_dropdown_set_selected(objects.nodes_filter_channel_dropdown, 0);
         lv_dropdown_set_selected(objects.nodes_filter_hops_dropdown, 0);
         lv_textarea_set_text(objects.nodes_filter_name_area, "");
+#if defined(SEEED_MESHPAGER_X2)
+        // keypad: swallow the release and clear the pressed state (the
+        // panel switch below happens mid-press)
+        lv_indev_wait_release(lv_indev_get_act());
+        lv_obj_remove_state(lv_event_get_target_obj(e), LV_STATE_PRESSED);
+#endif
         THIS->ui_set_active(objects.nodes_button, objects.nodes_panel, objects.top_nodes_panel);
         THIS->updateNodesFiltered(true);
         THIS->storeNodeOptions();
+#if !defined(SEEED_MESHPAGER_X2)
         ignoreClicked = true;
+#endif
     }
 }
 
@@ -2237,6 +2374,10 @@ void TFTView_320x240::ui_event_WLANButton(lv_event_t *e)
             !THIS->db.connectionStatus.wifi.status.is_connected &&
             !THIS->db.config.network.eth_enabled) { // TODO: this is a workaround for bug in portduino layer
             // open settings dialog
+#if defined(SEEED_MESHPAGER_X2)
+            // keypad: swallow the release (focus moves mid-press below)
+            lv_indev_wait_release(lv_indev_get_act());
+#endif
             lv_textarea_set_text(objects.settings_wifi_ssid_textarea, THIS->db.config.network.wifi_ssid);
             lv_textarea_set_text(objects.settings_wifi_password_textarea, THIS->db.config.network.wifi_psk);
             lv_obj_clear_flag(objects.settings_wifi_panel, LV_OBJ_FLAG_HIDDEN);
@@ -2357,10 +2498,21 @@ void TFTView_320x240::ui_event_KeyboardButton(lv_event_t *e)
             if (lv_obj_has_flag(objects.keyboard, LV_OBJ_FLAG_HIDDEN)) {
                 lv_obj_remove_flag(objects.keyboard, LV_OBJ_FLAG_HIDDEN);
                 THIS->showKeyboard(objects.message_input_area);
+#if defined(SEEED_MESHPAGER_X2)
+                // the arrows must reach the keyboard's buttonmatrix to type;
+                // on the textarea they would only move the text cursor
+                lv_group_focus_obj(objects.keyboard);
+#else
+                lv_group_focus_obj(objects.message_input_area);
+#endif
             } else {
+#if defined(SEEED_MESHPAGER_X2)
+                closeKeyboardFocusInput();
+#else
                 THIS->hideKeyboard(objects.messages_panel);
+                lv_group_focus_obj(objects.message_input_area);
+#endif
             }
-            lv_group_focus_obj(objects.message_input_area);
             return; // continue play animation, don't hide keyboard immediately
         case 1:
             THIS->showKeyboard(objects.settings_user_short_textarea);
@@ -2411,6 +2563,11 @@ void TFTView_320x240::ui_event_KeyboardButton(lv_event_t *e)
         }
         lv_obj_has_flag(objects.keyboard, LV_OBJ_FLAG_HIDDEN) ? lv_obj_remove_flag(objects.keyboard, LV_OBJ_FLAG_HIDDEN)
                                                               : lv_obj_add_flag(objects.keyboard, LV_OBJ_FLAG_HIDDEN);
+#if defined(SEEED_MESHPAGER_X2)
+        // d-pad: with the keyboard up the arrows drive its buttonmatrix to type
+        if (!lv_obj_has_flag(objects.keyboard, LV_OBJ_FLAG_HIDDEN))
+            lv_group_focus_obj(objects.keyboard);
+#endif
     }
 }
 
@@ -2479,24 +2636,16 @@ void TFTView_320x240::ui_event_message_ready(lv_event_t *e)
                 THIS->handleAddMessage(txt);
                 lv_textarea_set_text(objects.message_input_area, "");
                 if (!lv_obj_has_flag(objects.keyboard, LV_OBJ_FLAG_HIDDEN)) {
+#if defined(SEEED_MESHPAGER_X2)
+                    // hide at once (no slide-out tail)
+                    lv_obj_add_flag(objects.keyboard, LV_OBJ_FLAG_HIDDEN);
+#endif
                     THIS->hideKeyboard(objects.messages_panel);
                 }
 #if defined(SEEED_MESHPAGER_X2)
-                // after sending, land in the message list so UP/DOWN can browse
-                // the history: focus the label of the newest bubble
-                lv_obj_t *bubble = NULL;
-                uint32_t cnt = THIS->activeMsgContainer ? lv_obj_get_child_count(THIS->activeMsgContainer) : 0;
-                if (cnt)
-                    bubble = lv_obj_get_child(THIS->activeMsgContainer, cnt - 1);
-                lv_obj_t *msgLabel = NULL;
-                for (uint32_t i = 0; bubble && i < lv_obj_get_child_count(bubble); i++) {
-                    lv_obj_t *ch = lv_obj_get_child(bubble, i);
-                    if (ch->class_p == &lv_label_class) {
-                        msgLabel = ch;
-                        break;
-                    }
-                }
-                lv_group_focus_obj(msgLabel ? msgLabel : objects.message_input_area);
+                // after sending, land in the message list so UP/DOWN can
+                // browse the history
+                focusLastMessageBubble();
 #else
                 lv_group_focus_obj(objects.message_input_area);
 #endif
@@ -7972,9 +8121,14 @@ void TFTView_320x240::setGroupFocus(lv_obj_t *panel)
     } else if (panel == objects.messages_panel) {
         lv_group_focus_obj(objects.message_input_area);
     } else if (panel == objects.chats_panel) {
+#if defined(SEEED_MESHPAGER_X2)
+        // land on the first visible chat row of the scope
+        focusFirstInScope(objects.chats_panel);
+#else
         if (chats.size() > 0) {
             lv_group_focus_obj(panel->spec_attr->children[1]); // TODO: does not work
         }
+#endif
     } else if (panel == objects.node_options_panel) {
 #if defined(SEEED_MESHPAGER_X2)
         // the panel's only child is the tabview; land focus on the first row
@@ -8012,6 +8166,10 @@ void TFTView_320x240::cleanupAllOverlays(void)
 
     // Close keyboard if visible
     if (objects.keyboard && !lv_obj_has_flag(objects.keyboard, LV_OBJ_FLAG_HIDDEN)) {
+#if defined(SEEED_MESHPAGER_X2)
+        // hideKeyboard() only acts on the messages panel - hide directly here
+        lv_obj_add_flag(objects.keyboard, LV_OBJ_FLAG_HIDDEN);
+#endif
         hideKeyboard(activePanel);
     }
 

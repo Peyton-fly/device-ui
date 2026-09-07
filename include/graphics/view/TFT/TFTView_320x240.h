@@ -415,6 +415,10 @@ class TFTView_320x240 : public MeshtasticView
     static void ui_event_chat_input_key(lv_event_t *e);
     static void ui_event_keyboard_key(lv_event_t *e);
     static void ui_event_map_key(lv_event_t *e);
+    // X2 key handlers for the chat keyboard toggle and the chat message area.
+    static void ui_event_keyboard_button_key(lv_event_t *e);
+    static void focusLastMessageBubble(void);
+    static void closeKeyboardFocusInput(void);
 #endif
 
     static void ui_event_ok(lv_event_t *e);

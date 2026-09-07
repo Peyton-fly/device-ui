@@ -711,6 +711,11 @@ static lv_obj_t *scopeOf(lv_obj_t *obj)
 // instead of also navigating back.
 static lv_obj_t *dropdownEscSource = NULL;
 
+// the keyboard button that opened the current keyboard session; closing the
+// keyboard in a settings dialog returns the focus to it (the chat keeps its
+// input-line flow). Always set right before the keyboard opens.
+static lv_obj_t *keyboardOpenerButton = NULL;
+
 // move keypad focus to the next/previous member of the default input group
 // that lives inside "focused"'s scope, wrapping symmetrically at the edges.
 // "scope_override" confines the walk to a sub-scope of the panel (the chat
@@ -1652,14 +1657,18 @@ void TFTView_320x240::focusLastMessageBubble(void)
     lv_group_focus_obj(msgLabel ? msgLabel : objects.message_input_area);
 }
 
-// X2: hide the keyboard at once (no slide-out tail) and refocus its
-// associated textarea - the chat input line or a settings dialog's field.
+// X2: hide the keyboard at once (no slide-out tail) and refocus - the chat
+// lands back on its input line, settings dialogs on the button that opened
+// the keyboard, so the d-pad can walk on from there.
 void TFTView_320x240::closeKeyboardFocusInput(void)
 {
     lv_obj_add_flag(objects.keyboard, LV_OBJ_FLAG_HIDDEN);
     THIS->hideKeyboard(THIS->activePanel);
     lv_obj_t *ta = lv_keyboard_get_textarea(objects.keyboard);
-    lv_group_focus_obj(ta ? ta : objects.message_input_area);
+    if (ta && ta != objects.message_input_area && keyboardOpenerButton)
+        lv_group_focus_obj(keyboardOpenerButton);
+    else
+        lv_group_focus_obj(ta ? ta : objects.message_input_area);
 }
 
 // X2 chat focus flow (on the one-line input): LEFT/RIGHT pair with the
@@ -2493,6 +2502,9 @@ void TFTView_320x240::ui_event_KeyboardButton(lv_event_t *e)
     lv_event_code_t event_code = lv_event_get_code(e);
     if (event_code == LV_EVENT_CLICKED) {
         uint32_t keyBtnIdx = (unsigned long)e->user_data;
+#if defined(SEEED_MESHPAGER_X2)
+        keyboardOpenerButton = lv_event_get_target_obj(e); // closing the keyboard returns focus here
+#endif
         switch (keyBtnIdx) {
         case 0:
             if (lv_obj_has_flag(objects.keyboard, LV_OBJ_FLAG_HIDDEN)) {
@@ -2599,12 +2611,16 @@ void TFTView_320x240::ui_event_Keyboard(lv_event_t *e)
             break;
         }
         case 39: { // checkmark
+#if defined(SEEED_MESHPAGER_X2)
+            closeKeyboardFocusInput();
+#else
             if (THIS->activePanel == objects.messages_panel) {
                 THIS->hideKeyboard(objects.messages_panel);
             } else {
                 lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
             }
             lv_group_focus_obj(objects.message_input_area);
+#endif
             break;
         }
         default:

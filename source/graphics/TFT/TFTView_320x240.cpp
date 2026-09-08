@@ -1567,10 +1567,12 @@ void TFTView_320x240::ui_event_ButtonPanel(lv_event_t *e)
         }
         case LV_KEY_UP:
             lv_group_focus_prev(groups.mainButtons);
+            THIS->applyMainButtonFocus();
             lv_event_stop_processing(e);
             break;
         case LV_KEY_DOWN:
             lv_group_focus_next(groups.mainButtons);
+            THIS->applyMainButtonFocus();
             lv_event_stop_processing(e);
             break;
         default:
@@ -1578,6 +1580,29 @@ void TFTView_320x240::ui_event_ButtonPanel(lv_event_t *e)
         }
     }
 }
+
+#if defined(SEEED_MESHPAGER_X2)
+// X2: d-pad UP/DOWN on the nav bar is a one-step entry - reuse ui_set_active
+// to switch the side panel and land focus on its first item.
+void TFTView_320x240::applyMainButtonFocus(void)
+{
+    lv_obj_t *cur = lv_group_get_focused(groups.mainButtons);
+    if (!cur) return;
+
+    if (cur == objects.home_button)
+        ui_set_active(objects.home_button, objects.home_panel, objects.top_panel);
+    else if (cur == objects.nodes_button)
+        ui_set_active(objects.nodes_button, objects.nodes_panel, objects.top_nodes_panel);
+    else if (cur == objects.groups_button)
+        ui_set_active(objects.groups_button, objects.groups_panel, objects.top_groups_panel);
+    else if (cur == objects.messages_button)
+        ui_set_active(objects.messages_button, objects.chats_panel, objects.top_chats_panel);
+    else if (cur == objects.map_button)
+        ui_set_active(objects.map_button, objects.map_panel, objects.top_map_panel);
+    else if (cur == objects.settings_button)
+        ui_set_active(objects.settings_button, objects.controller_panel, objects.top_settings_panel);
+}
+#endif
 
 // ---------------------------------------------------------------------------
 // X2 d-pad: CHECKABLE arrow guard

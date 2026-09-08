@@ -249,6 +249,11 @@ class TFTView_320x240 : public MeshtasticView
     void updateTheme(void);
     void ui_events_init(void);
     void ui_set_active(lv_obj_t *b, lv_obj_t *p, lv_obj_t *tp);
+#if defined(SEEED_MESHPAGER_X2)
+    // X2: d-pad UP/DOWN on the nav bar is a one-step entry - reuse ui_set_active
+    // to switch the side panel and land focus on its first item.
+    void applyMainButtonFocus(void);
+#endif
     void showKeyboard(lv_obj_t *textArea);
     void hideKeyboard(lv_obj_t *panel);
     lv_obj_t *showQrCode(lv_obj_t *parent, const char *data);

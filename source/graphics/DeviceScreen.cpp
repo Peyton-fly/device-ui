@@ -81,6 +81,11 @@ void DeviceScreen::toggleDisplay(void)
     gui->toggleDisplay();
 }
 
+void DeviceScreen::forceWakeup(void)
+{
+    gui->getDisplayDriver()->forceWakeup();
+}
+
 #if defined(ARDUINO_ARCH_ESP32)
 int DeviceScreen::prepareSleep(void *)
 {

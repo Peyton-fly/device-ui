@@ -2495,6 +2495,12 @@ void TFTView_320x240::ui_event_BlankScreenButton(lv_event_t *e)
         ILOG_DEBUG("screen unlocked by button");
         screenUnlockRequest = true;
     }
+#if defined(SEEED_MESHPAGER_X2)
+    else if (event_code == LV_EVENT_CANCEL) {
+        // keypad RETURN (ESC) unlocks the blank screen like an ENTER click
+        screenUnlockRequest = true;
+    }
+#endif
 }
 
 void TFTView_320x240::ui_event_KeyboardButton(lv_event_t *e)

@@ -1458,6 +1458,7 @@ void TFTView_320x240::ui_event_ScreenKey(lv_event_t *e)
         // LEFT/RIGHT: inside a chat they hop from the message area down to
         // the input line (input line <-> keyboard toggle switching lives
         // there); in the reboot dialog they walk its row of icon buttons.
+        // Elsewhere LEFT returns from the panel to the nav bar.
         if (c == LV_KEY_LEFT || c == LV_KEY_RIGHT) {
             lv_obj_t *target = lv_event_get_target_obj(e);
             if (target && THIS->activeMsgContainer && isAncestor(THIS->activeMsgContainer, target)) {
@@ -1465,6 +1466,21 @@ void TFTView_320x240::ui_event_ScreenKey(lv_event_t *e)
                 lv_event_stop_processing(e);
             } else if (target && THIS->activeSettings == eReboot) {
                 navigateScope(target, c == LV_KEY_RIGHT);
+                lv_event_stop_processing(e);
+            } else if (c == LV_KEY_LEFT && target && THIS->activeSettings == eNone &&
+                       lv_obj_get_screen(target) == objects.main_screen &&
+                       !isAncestor(objects.button_panel, target) &&
+                       !objConsumesArrows(target) &&
+                       !lv_obj_has_flag(target, LV_OBJ_FLAG_CHECKABLE) &&
+                       target->class_p != &lv_dropdown_class && target->class_p != &lv_slider_class) {
+                // leave the panel for the nav bar; overlays (keyboard, QR,
+                // popup) must not stay dangling, and the release is
+                // swallowed since focus moves mid-press. Dropdowns and
+                // sliders keep LEFT for their native behavior.
+                THIS->cleanupAllOverlays();
+                lv_indev_wait_release(lv_indev_get_act());
+                lv_obj_remove_state(target, LV_STATE_PRESSED);
+                THIS->exitPanelToNavBar();
                 lv_event_stop_processing(e);
             }
             return;
@@ -1482,10 +1498,7 @@ void TFTView_320x240::ui_event_ScreenKey(lv_event_t *e)
                 THIS->ui_set_active(objects.messages_button, objects.chats_panel, objects.top_chats_panel);
                 focusFirstInScope(objects.chats_panel);
             } else {
-                if (THIS->activePanel == objects.node_options_panel)
-                    THIS->storeNodeOptions(); // the ui_set_active save hook no longer runs
-                THIS->setInputGroup(groups.mainButtons);
-                lv_group_focus_obj(THIS->lastMainButton ? THIS->lastMainButton : objects.home_button);
+                THIS->exitPanelToNavBar();
             }
             lv_event_stop_processing(e); // Stop propagation so panel buttons don't see it
             return;
@@ -1581,14 +1594,35 @@ void TFTView_320x240::ui_event_ButtonPanel(lv_event_t *e)
         }
         case LV_KEY_UP:
             lv_group_focus_prev(groups.mainButtons);
-            THIS->applyMainButtonFocus();
+            THIS->applyMainButtonPreview();
             lv_event_stop_processing(e);
             break;
         case LV_KEY_DOWN:
             lv_group_focus_next(groups.mainButtons);
-            THIS->applyMainButtonFocus();
+            THIS->applyMainButtonPreview();
             lv_event_stop_processing(e);
             break;
+        case LV_KEY_RIGHT: {
+            // enter the previewed panel through the focused button's own
+            // CLICKED handler, so the settings-lock / message-restore /
+            // long-press guards keep applying; the release is swallowed
+            // since focus moves mid-press
+            lv_obj_t *cur = lv_group_get_focused(groups.mainButtons);
+            if (!cur)
+                break;
+            lv_indev_wait_release(lv_indev_get_act());
+            lv_obj_remove_state(cur, LV_STATE_PRESSED);
+            if (cur == objects.map_button && THIS->activeSettings == eNone) {
+                // the CLICKED handler would take its OSD-toggle branch once
+                // the preview set activePanel - load the map directly instead
+                THIS->ui_set_active(objects.map_button, objects.map_panel, objects.top_map_panel);
+                THIS->loadMap();
+            } else {
+                lv_obj_send_event(cur, LV_EVENT_CLICKED, nullptr);
+            }
+            lv_event_stop_processing(e);
+            break;
+        }
         default:
             break;
         }
@@ -1596,25 +1630,40 @@ void TFTView_320x240::ui_event_ButtonPanel(lv_event_t *e)
 }
 
 #if defined(SEEED_MESHPAGER_X2)
-// X2: d-pad UP/DOWN on the nav bar is a one-step entry - reuse ui_set_active
-// to switch the side panel and land focus on its first item.
-void TFTView_320x240::applyMainButtonFocus(void)
+// X2: d-pad UP/DOWN on the nav bar previews the side panel - switch panel and
+// highlight without moving keypad focus; RIGHT enters, LEFT/ESC come back.
+void TFTView_320x240::applyMainButtonPreview(void)
 {
     lv_obj_t *cur = lv_group_get_focused(groups.mainButtons);
-    if (!cur) return;
+    if (!cur)
+        return;
 
-    if (cur == objects.home_button)
-        ui_set_active(objects.home_button, objects.home_panel, objects.top_panel);
-    else if (cur == objects.nodes_button)
-        ui_set_active(objects.nodes_button, objects.nodes_panel, objects.top_nodes_panel);
-    else if (cur == objects.groups_button)
-        ui_set_active(objects.groups_button, objects.groups_panel, objects.top_groups_panel);
-    else if (cur == objects.messages_button)
-        ui_set_active(objects.messages_button, objects.chats_panel, objects.top_chats_panel);
-    else if (cur == objects.map_button)
-        ui_set_active(objects.map_button, objects.map_panel, objects.top_map_panel);
-    else if (cur == objects.settings_button)
-        ui_set_active(objects.settings_button, objects.controller_panel, objects.top_settings_panel);
+    if (cur == objects.home_button) {
+        ui_select_main_panel(objects.home_button, objects.home_panel, objects.top_panel);
+    } else if (cur == objects.nodes_button) {
+        ui_select_main_panel(objects.nodes_button, objects.nodes_panel, objects.top_nodes_panel);
+    } else if (cur == objects.groups_button) {
+        ui_select_main_panel(objects.groups_button, objects.groups_panel, objects.top_groups_panel);
+    } else if (cur == objects.messages_button) {
+        ui_select_main_panel(objects.messages_button, objects.chats_panel, objects.top_chats_panel);
+    } else if (cur == objects.map_button) {
+        ui_select_main_panel(objects.map_button, objects.map_panel, objects.top_map_panel);
+    } else if (cur == objects.settings_button) {
+        // locked settings have nothing to preview; entering still routes
+        // through the lock screen in the button's CLICKED handler
+        if (!db.uiConfig.settings_lock)
+            ui_select_main_panel(objects.settings_button, objects.controller_panel, objects.top_settings_panel);
+    }
+}
+
+// X2: return from the active panel to the nav bar, landing on the button of
+// the panel being left (shared by ESC and LEFT)
+void TFTView_320x240::exitPanelToNavBar(void)
+{
+    if (activePanel == objects.node_options_panel)
+        storeNodeOptions(); // the ui_set_active save hook no longer runs
+    setInputGroup(groups.mainButtons);
+    lv_group_focus_obj(lastMainButton ? lastMainButton : objects.home_button);
 }
 #endif
 

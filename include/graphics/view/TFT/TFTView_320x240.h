@@ -248,6 +248,7 @@ class TFTView_320x240 : public MeshtasticView
     void enterProgrammingMode(void);
     void updateTheme(void);
     void ui_events_init(void);
+    void ui_select_main_panel(lv_obj_t *b, lv_obj_t *p, lv_obj_t *tp);
     void ui_set_active(lv_obj_t *b, lv_obj_t *p, lv_obj_t *tp);
 #if defined(SEEED_MESHPAGER_X2)
     // X2: d-pad UP/DOWN on the nav bar is a one-step entry - reuse ui_set_active

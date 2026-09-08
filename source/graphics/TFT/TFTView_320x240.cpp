@@ -468,13 +468,13 @@ void TFTView_320x240::init_screens(void)
 }
 
 /**
- * @brief set active button, panel and top panel
+ * @brief set active button, panel and top panel, without moving keypad focus
  *
  * @param b button to set active
  * @param p main panel to set active
  * @param tp top panel to set active
  */
-void TFTView_320x240::ui_set_active(lv_obj_t *b, lv_obj_t *p, lv_obj_t *tp)
+void TFTView_320x240::ui_select_main_panel(lv_obj_t *b, lv_obj_t *p, lv_obj_t *tp)
 {
     if (activeButton) {
         lv_obj_set_style_border_width(activeButton, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -524,6 +524,20 @@ void TFTView_320x240::ui_set_active(lv_obj_t *b, lv_obj_t *p, lv_obj_t *tp)
     activePanel = p;
 #if defined(SEEED_MESHPAGER_X2)
     lastMainButton = b; // Track which main button was selected for ESC return
+#endif
+}
+
+/**
+ * @brief set active button, panel and top panel, and move keypad focus into the panel
+ *
+ * @param b button to set active
+ * @param p main panel to set active
+ * @param tp top panel to set active
+ */
+void TFTView_320x240::ui_set_active(lv_obj_t *b, lv_obj_t *p, lv_obj_t *tp)
+{
+    ui_select_main_panel(b, p, tp);
+#if defined(SEEED_MESHPAGER_X2)
     setInputGroup(defaultPanelGroup);
 #endif
     if (activePanel == objects.messages_panel) {

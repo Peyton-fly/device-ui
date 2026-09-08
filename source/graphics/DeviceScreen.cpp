@@ -1,6 +1,7 @@
 #include "graphics/DeviceScreen.h"
 #include "Arduino.h"
 #include "graphics/common/ViewFactory.h"
+#include "graphics/driver/DisplayDriver.h"
 #include "util/ILog.h"
 
 #if defined(ARDUINO_ARCH_ESP32)

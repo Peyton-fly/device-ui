@@ -2491,13 +2491,15 @@ void TFTView_320x240::ui_event_CancelQrButton(lv_event_t *e)
 void TFTView_320x240::ui_event_BlankScreenButton(lv_event_t *e)
 {
     lv_event_code_t event_code = lv_event_get_code(e);
-    if (event_code == LV_EVENT_CLICKED) {
+#if defined(SEEED_MESHPAGER_X2)
+    // X2: RETURN (ESC/CANCEL) is the single wake+unlock key
+    if (event_code == LV_EVENT_CANCEL) {
         ILOG_DEBUG("screen unlocked by button");
         screenUnlockRequest = true;
     }
-#if defined(SEEED_MESHPAGER_X2)
-    else if (event_code == LV_EVENT_CANCEL) {
-        // keypad RETURN (ESC) unlocks the blank screen like an ENTER click
+#else
+    if (event_code == LV_EVENT_CLICKED) {
+        ILOG_DEBUG("screen unlocked by button");
         screenUnlockRequest = true;
     }
 #endif

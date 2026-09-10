@@ -2187,9 +2187,19 @@ void TFTView_320x240::ui_event_SettingsButton(lv_event_t *e)
         }
     } else if (event_code == LV_EVENT_LONG_PRESSED && !advancedMode && THIS->activeSettings == eNone) {
         ILOG_DEBUG("screen locked");
+#if defined(SEEED_MESHPAGER_X2)
+        // swallow the release and clear the pressed state (the screen saver
+        // moves focus away mid-press); no ignoreClicked needed - the
+        // swallowed release never delivers a CLICKED
+        lv_indev_wait_release(lv_indev_get_act());
+        lv_obj_remove_state(lv_event_get_target_obj(e), LV_STATE_PRESSED);
+        screenLocked = true;
+        screenUnlockRequest = false;
+#else
         screenLocked = true;
         screenUnlockRequest = false;
         ignoreClicked = true;
+#endif
     } else if (event_code == LV_EVENT_LONG_PRESSED && advancedMode && THIS->activeSettings == eNone) {
 #if defined(SEEED_MESHPAGER_X2)
         // keypad: swallow the release and clear the pressed state (the
@@ -7049,6 +7059,13 @@ void TFTView_320x240::screenSaving(bool enabled)
 {
     if (enabled) {
 #if defined(SEEED_MESHPAGER_X2)
+        // clear a pressed state stuck on the focused button: moving focus
+        // to the blank screen below would swallow its RELEASED event
+        lv_indev_t *kb = inputdriver->getKeyboard();
+        lv_group_t *grp = kb ? lv_indev_get_group(kb) : NULL;
+        lv_obj_t *held = grp ? lv_group_get_focused(grp) : NULL;
+        if (held)
+            lv_obj_remove_state(held, LV_STATE_PRESSED);
         // switch the keyboard indev to mainButtons now; the SCREEN_LOAD_START handler will
         // add blank_screen_button to the group and focus it once the screen starts loading
         setInputGroup(groups.mainButtons);

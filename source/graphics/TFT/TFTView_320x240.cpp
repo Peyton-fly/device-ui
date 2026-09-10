@@ -467,6 +467,10 @@ void TFTView_320x240::init_screens(void)
     ILOG_DEBUG("TFTView_320x240 init done.");
 }
 
+// navigation helpers defined below: hidden-tree test and first-focusable search
+static bool ancestorHidden(lv_obj_t *obj);
+static bool focusFirstInScope(lv_obj_t *scope);
+
 /**
  * @brief set active button, panel and top panel, without moving keypad focus
  *
@@ -548,6 +552,13 @@ void TFTView_320x240::ui_set_active(lv_obj_t *b, lv_obj_t *p, lv_obj_t *tp)
 
     lv_obj_add_flag(objects.keyboard, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(objects.msg_popup_panel, LV_OBJ_FLAG_HIDDEN);
+#if defined(SEEED_MESHPAGER_X2)
+    // keypad focus resting on a hidden object would silently swallow all keys;
+    // land it on the first focusable widget of the active panel, or fall back
+    // to the nav bar when the panel has none
+    if (defaultPanelGroup && ancestorHidden(lv_group_get_focused(defaultPanelGroup)) && !focusFirstInScope(activePanel))
+        exitPanelToNavBar();
+#endif
 }
 
 void TFTView_320x240::enterProgrammingMode(void)
@@ -768,20 +779,22 @@ static bool navigateScope(lv_obj_t *focused, bool next, lv_obj_t *scope_override
     return false;
 }
 
-// focus the first visible group member inside "scope" (after a page switch)
-static void focusFirstInScope(lv_obj_t *scope)
+// focus the first visible group member inside "scope" (after a page switch);
+// false when the scope holds no visible focusable member
+static bool focusFirstInScope(lv_obj_t *scope)
 {
     lv_group_t *group = lv_group_get_default();
     if (!group || !scope)
-        return;
+        return false;
     uint32_t count = lv_group_get_obj_count(group);
     for (uint32_t i = 0; i < count; i++) {
         lv_obj_t *candidate = lv_group_get_obj_by_index(group, i);
         if (isAncestor(scope, candidate) && !ancestorHidden(candidate)) {
             lv_group_focus_obj(candidate);
-            return;
+            return true;
         }
     }
+    return false;
 }
 
 // switch to the neighboring tab of the tabview owning "from" and focus the
@@ -1646,6 +1659,8 @@ void TFTView_320x240::applyMainButtonPreview(void)
         ui_select_main_panel(objects.groups_button, objects.groups_panel, objects.top_groups_panel);
     } else if (cur == objects.messages_button) {
         ui_select_main_panel(objects.messages_button, objects.chats_panel, objects.top_chats_panel);
+        // the mail banner is acknowledged once the chats list is on screen
+        lv_obj_add_flag(objects.msg_popup_panel, LV_OBJ_FLAG_HIDDEN);
     } else if (cur == objects.map_button) {
         ui_select_main_panel(objects.map_button, objects.map_panel, objects.top_map_panel);
     } else if (cur == objects.settings_button) {
@@ -8017,7 +8032,11 @@ void TFTView_320x240::showMessagePopup(uint32_t from, uint32_t to, uint8_t ch, c
         if (db.module_config.external_notification.alert_message)
             lv_disp_trig_activity(NULL);
 
+#if !defined(SEEED_MESHPAGER_X2)
         lv_group_focus_obj(objects.msg_popup_button);
+#else
+        // X2: the popup is a passive banner; keypad focus stays where it is
+#endif
     }
 }
 
@@ -8036,7 +8055,9 @@ void TFTView_320x240::showMessages(uint8_t ch)
     if (!messagesRestored) {
         // display message restoration progress banner
         lv_obj_clear_flag(objects.msg_popup_panel, LV_OBJ_FLAG_HIDDEN);
+#if !defined(SEEED_MESHPAGER_X2)
         lv_group_focus_obj(objects.msg_popup_button);
+#endif
         return;
     }
 

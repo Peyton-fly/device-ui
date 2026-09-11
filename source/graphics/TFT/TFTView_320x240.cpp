@@ -8282,9 +8282,10 @@ void TFTView_320x240::setGroupFocus(lv_obj_t *panel)
     } else if (panel == objects.node_options_panel) {
 #if defined(SEEED_MESHPAGER_X2)
         // the panel's only child is the tabview; land focus on the first row
-        // of the filter page instead of leaving it on the previous screen's
+        // of the active page instead of leaving it on the previous screen's
         // (now hidden) widget
-        focusFirstInScope(objects.tab_page_filter);
+        focusFirstInScope(lv_obj_get_child(lv_tabview_get_content(objects.node_options_tab_view),
+                                           (int32_t)lv_tabview_get_tab_active(objects.node_options_tab_view)));
 #endif
     } else if (panel == objects.map_panel) {
 #if defined(SEEED_MESHPAGER_X2)
@@ -8294,7 +8295,14 @@ void TFTView_320x240::setGroupFocus(lv_obj_t *panel)
     } else if (panel == objects.settings_screen_lock_panel) {
         lv_group_focus_obj(objects.screen_lock_button_matrix);
     } else if (panel == objects.controller_panel) {
+#if defined(SEEED_MESHPAGER_X2)
+        // the tabview remembers the last visited page; focusing a hardcoded
+        // tab-0 row would land the ring off-screen (clipped, not hidden)
+        focusFirstInScope(lv_obj_get_child(lv_tabview_get_content(objects.controller_tab_view),
+                                           (int32_t)lv_tabview_get_tab_active(objects.controller_tab_view)));
+#else
         lv_group_focus_obj(objects.basic_settings_user_button);
+#endif
     } else {
         for (int i = 0; i < lv_obj_get_child_count(panel); i++) {
             if (panel->spec_attr->children[i]->class_p == &lv_button_class) {

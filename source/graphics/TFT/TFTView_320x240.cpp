@@ -192,6 +192,7 @@ void TFTView_320x240::init(IClientBase *client)
 
 #if defined(SEEED_MESHPAGER_X2)
     defaultPanelGroup = lv_group_get_default();
+    confirmDialogGroup = lv_group_create();
 
     lv_obj_add_event_cb(objects.boot_screen, ui_event_screen_focus_policy, LV_EVENT_SCREEN_LOAD_START, NULL);
     lv_obj_add_event_cb(objects.blank_screen, ui_event_screen_focus_policy, LV_EVENT_SCREEN_LOAD_START, NULL);
@@ -3160,8 +3161,7 @@ void TFTView_320x240::ui_event_device_progmode_button(lv_event_t *e)
 #if defined(HAS_SCREEN) && HAS_SCREEN == 1
             ignoreClicked = true;
             // open dialog
-            lv_obj_remove_flag(objects.settings_reboot_panel, LV_OBJ_FLAG_HIDDEN);
-            lv_group_focus_obj(objects.settings_reboot_panel);
+            THIS->openConfirmDialog(objects.settings_reboot_panel, objects.obj2__ok_button_w, objects.obj2__cancel_button_w);
             THIS->activeSettings = eDisplayMode;
 #endif
         }
@@ -3187,7 +3187,7 @@ void TFTView_320x240::ui_event_device_cancel_button(lv_event_t *e)
     if (event_code == LV_EVENT_CLICKED) {
         lv_screen_load_anim(objects.main_screen, LV_SCR_LOAD_ANIM_NONE, 0, 0, false);
         lv_obj_add_flag(objects.reboot_panel, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(objects.settings_reboot_panel, LV_OBJ_FLAG_HIDDEN);
+        THIS->closeConfirmDialog(objects.settings_reboot_panel, objects.obj2__ok_button_w, objects.obj2__cancel_button_w);
         THIS->enablePanel(objects.controller_panel);
         THIS->enablePanel(objects.tab_page_basic_settings);
         lv_group_focus_obj(objects.basic_settings_reboot_button);
@@ -5382,7 +5382,7 @@ void TFTView_320x240::ui_event_ok(lv_event_t *e)
             THIS->controller->requestReboot(5, THIS->ownNode);
             lv_screen_load_anim(objects.blank_screen, LV_SCR_LOAD_ANIM_FADE_OUT, 4000, 1000, false);
             lv_obj_add_flag(objects.reboot_panel, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_add_flag(objects.settings_reboot_panel, LV_OBJ_FLAG_HIDDEN);
+            THIS->closeConfirmDialog(objects.settings_reboot_panel, objects.obj2__ok_button_w, objects.obj2__cancel_button_w);
             break;
         }
         case eModifyChannel: {
@@ -5542,7 +5542,7 @@ void TFTView_320x240::ui_event_cancel(lv_event_t *e)
             break;
         }
         case TFTView_320x240::eDisplayMode: {
-            lv_obj_add_flag(objects.settings_reboot_panel, LV_OBJ_FLAG_HIDDEN);
+            THIS->closeConfirmDialog(objects.settings_reboot_panel, objects.obj2__ok_button_w, objects.obj2__cancel_button_w);
             lv_group_focus_obj(objects.basic_settings_reset_button);
             break;
         }
@@ -8344,6 +8344,40 @@ void TFTView_320x240::cleanupAllOverlays(void)
     }
 }
 #endif // SEEED_MESHPAGER_X2
+
+/**
+ * While a confirm dialog is open, its OK/Cancel buttons get their own input
+ * group so keypad focus cannot walk out of the dialog into the (still
+ * focusable) widgets behind it.
+ */
+void TFTView_320x240::openConfirmDialog(lv_obj_t *panel, lv_obj_t *ok, lv_obj_t *cancel)
+{
+    lv_obj_remove_flag(panel, LV_OBJ_FLAG_HIDDEN);
+#if defined(SEEED_MESHPAGER_X2)
+    if (confirmDialogGroup && ok && cancel) {
+        lv_group_add_obj(confirmDialogGroup, ok);
+        lv_group_add_obj(confirmDialogGroup, cancel);
+        setInputGroup(confirmDialogGroup);
+        lv_group_focus_obj(ok);
+        return;
+    }
+#endif
+    lv_group_focus_obj(panel);
+}
+
+void TFTView_320x240::closeConfirmDialog(lv_obj_t *panel, lv_obj_t *ok, lv_obj_t *cancel)
+{
+    if (lv_obj_has_flag(panel, LV_OBJ_FLAG_HIDDEN))
+        return; // was not open
+    lv_obj_add_flag(panel, LV_OBJ_FLAG_HIDDEN);
+#if defined(SEEED_MESHPAGER_X2)
+    if (confirmDialogGroup && ok && cancel && defaultPanelGroup) {
+        lv_group_add_obj(defaultPanelGroup, ok);
+        lv_group_add_obj(defaultPanelGroup, cancel);
+        setInputGroup(defaultPanelGroup);
+    }
+#endif
+}
 
 /**
  * input group used by keyboard and/or pointer for dynamic assignment

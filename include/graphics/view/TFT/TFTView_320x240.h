@@ -264,6 +264,8 @@ class TFTView_320x240 : public MeshtasticView
     void disablePanel(lv_obj_t *panel);
     void setGroupFocus(lv_obj_t *panel);
     void setInputGroup(lv_group_t *group = nullptr);
+    void openConfirmDialog(lv_obj_t *panel, lv_obj_t *ok, lv_obj_t *cancel);
+    void closeConfirmDialog(lv_obj_t *panel, lv_obj_t *ok, lv_obj_t *cancel);
     void cleanupAllOverlays(void);
     void setInputButtonLabel(void);
     void updateGroupChannel(uint8_t chId);
@@ -459,6 +461,7 @@ class TFTView_320x240 : public MeshtasticView
     lv_obj_t *activeTextInput = nullptr;
     lv_group_t *input_group = nullptr;
     lv_group_t *defaultPanelGroup = nullptr; // The default LVGL group for panel content widgets
+    lv_group_t *confirmDialogGroup = nullptr; // While a confirm dialog is open, its OK/Cancel buttons live here alone
 
     enum BasicSettings activeSettings = eNone; // active settings menu (used to disable other button presses)
 

@@ -5046,6 +5046,8 @@ void TFTView_320x240::ui_event_ok(lv_event_t *e)
                 strcpy(user.long_name, userLong);
                 THIS->controller->sendConfig(user, THIS->ownNode);
             }
+            // Ask the firmware to schedule the reboot; the local LVGL reboot timer only runs in standalone mode.
+            THIS->controller->requestReboot(5);
             THIS->notifyReboot(true);
 
             lv_obj_add_flag(objects.initial_setup_panel, LV_OBJ_FLAG_HIDDEN);

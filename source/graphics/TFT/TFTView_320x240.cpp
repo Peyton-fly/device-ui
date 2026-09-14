@@ -1769,6 +1769,10 @@ void TFTView_320x240::closeKeyboardFocusInput(void)
     lv_obj_add_flag(objects.keyboard, LV_OBJ_FLAG_HIDDEN);
     THIS->hideKeyboard(THIS->activePanel);
     lv_obj_t *ta = lv_keyboard_get_textarea(objects.keyboard);
+    // the cursor follows the keypad group focus: drop it before refocusing,
+    // the chat branch re-adds it by focusing the input line again
+    if (ta)
+        lv_obj_remove_state(ta, LV_STATE_FOCUSED);
     if (ta && ta != objects.message_input_area && keyboardOpenerButton)
         lv_group_focus_obj(keyboardOpenerButton);
     else
@@ -2782,7 +2786,8 @@ void TFTView_320x240::ui_event_message_ready(lv_event_t *e)
                 }
 #if defined(SEEED_MESHPAGER_X2)
                 // after sending, land in the message list so UP/DOWN can
-                // browse the history
+                // browse the history; the input cursor goes dark with it
+                lv_obj_remove_state(objects.message_input_area, LV_STATE_FOCUSED);
                 focusLastMessageBubble();
 #else
                 lv_group_focus_obj(objects.message_input_area);
@@ -8163,6 +8168,11 @@ void TFTView_320x240::showKeyboard(lv_obj_t *textArea)
         }
     }
     lv_keyboard_set_textarea(objects.keyboard, textArea);
+#if defined(SEEED_MESHPAGER_X2)
+    // while typing, the keypad group focus sits on the keyboard; the cursor
+    // only renders on LV_STATE_FOCUSED, so keep that state on the textarea
+    lv_obj_add_state(textArea, LV_STATE_FOCUSED);
+#endif
 }
 
 void TFTView_320x240::hideKeyboard(lv_obj_t *panel)

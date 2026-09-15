@@ -3168,6 +3168,12 @@ void TFTView_320x240::ui_event_device_progmode_button(lv_event_t *e)
             // open dialog
             THIS->openConfirmDialog(objects.settings_reboot_panel, objects.obj2__ok_button_w, objects.obj2__cancel_button_w);
             THIS->activeSettings = eDisplayMode;
+#if defined(SEEED_MESHPAGER_X2)
+            // keypad: swallow the release and clear the pressed state (the
+            // dialog moves focus to its OK button mid-press)
+            lv_indev_wait_release(lv_indev_get_act());
+            lv_obj_remove_state(lv_event_get_target_obj(e), LV_STATE_PRESSED);
+#endif
 #endif
         }
     }

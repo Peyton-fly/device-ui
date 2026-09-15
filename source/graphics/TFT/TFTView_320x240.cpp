@@ -5555,9 +5555,19 @@ void TFTView_320x240::ui_event_cancel(lv_event_t *e)
             break;
         }
         case TFTView_320x240::eDisplayMode: {
+#if defined(SEEED_MESHPAGER_X2)
+            // the dialog lives on the boot screen's reboot panel, so the
+            // common tail below (enablePanel + activeSettings = eNone) would
+            // strand the screen and keypad focus; stay on the panel instead
+            THIS->closeConfirmDialog(objects.settings_reboot_panel, objects.obj2__ok_button_w, objects.obj2__cancel_button_w);
+            lv_group_focus_obj(objects.progmode_button);
+            THIS->activeSettings = eReboot;
+            return;
+#else
             THIS->closeConfirmDialog(objects.settings_reboot_panel, objects.obj2__ok_button_w, objects.obj2__cancel_button_w);
             lv_group_focus_obj(objects.basic_settings_reset_button);
             break;
+#endif
         }
         case TFTView_320x240::eModifyChannel: {
             lv_obj_add_flag(objects.settings_modify_channel_panel, LV_OBJ_FLAG_HIDDEN);

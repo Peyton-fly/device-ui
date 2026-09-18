@@ -772,7 +772,9 @@ static bool navigateScope(lv_obj_t *focused, bool next, lv_obj_t *scope_override
         lv_obj_t *candidate = lv_group_get_obj_by_index(group, idx);
         if (candidate == focused)
             continue;
-        if (isAncestor(scope, candidate) && !ancestorHidden(candidate)) {
+        // skip the scope itself so row navigation never parks on the panel
+        // anchor (chats_panel); from the anchor UP/DOWN still reach the rows
+        if (candidate != scope && isAncestor(scope, candidate) && !ancestorHidden(candidate)) {
             lv_group_focus_obj(candidate);
             return true;
         }
@@ -790,7 +792,10 @@ static bool focusFirstInScope(lv_obj_t *scope)
     uint32_t count = lv_group_get_obj_count(group);
     for (uint32_t i = 0; i < count; i++) {
         lv_obj_t *candidate = lv_group_get_obj_by_index(group, i);
-        if (isAncestor(scope, candidate) && !ancestorHidden(candidate)) {
+        // skip the scope itself: a group-member scope (chats_panel, map_panel)
+        // precedes every dynamically created row in add order and must not
+        // win the scan over them
+        if (candidate != scope && isAncestor(scope, candidate) && !ancestorHidden(candidate)) {
             lv_group_focus_obj(candidate);
             return true;
         }
@@ -894,6 +899,9 @@ void TFTView_320x240::apply_hotfix(void)
         lv_group_add_obj(group, objects.zoom_out_button);
         // browse-mode focus holder for the two-mode map control (ui_event_map_key)
         lv_group_add_obj(group, objects.map_panel);
+        // empty-list focus anchor: with no chat rows, entering the chats
+        // panel still leaves keypad focus on the panel itself
+        lv_group_add_obj(group, objects.chats_panel);
     }
 
     // for keyboard control: main menu buttons are moved into own group
@@ -986,6 +994,7 @@ void TFTView_320x240::apply_hotfix(void)
     applyKeyFocusStyle(objects.screen_lock_button_matrix);
     applyKeyFocusStyle(objects.bluetooth_button);
     applyKeyFocusStyle(objects.map_panel);
+    applyKeyFocusStyle(objects.chats_panel);
 
     // The regenerated home_container carries FOCUSED-state styles that switch its
     // flex flow from ROW_WRAP to COLUMN (generated/ui_320x240/screens.c:416-419).
@@ -1743,8 +1752,9 @@ static void ui_event_editable_ramp(lv_event_t *e)
 }
 
 // X2 chat: put the focus on the newest bubble's label so UP/DOWN can browse
-// the history (an empty chat falls back to the input line - nothing to read).
-void TFTView_320x240::focusLastMessageBubble(void)
+// the history. False when there is no bubble to focus (an empty chat falls
+// back to the input line - nothing to read).
+bool TFTView_320x240::focusLastMessageBubble(void)
 {
     lv_obj_t *msgLabel = NULL;
     uint32_t cnt = THIS->activeMsgContainer ? lv_obj_get_child_count(THIS->activeMsgContainer) : 0;
@@ -1758,7 +1768,12 @@ void TFTView_320x240::focusLastMessageBubble(void)
             }
         }
     }
-    lv_group_focus_obj(msgLabel ? msgLabel : objects.message_input_area);
+    if (msgLabel) {
+        lv_group_focus_obj(msgLabel);
+        return true;
+    }
+    lv_group_focus_obj(objects.message_input_area);
+    return false;
 }
 
 // X2: hide the keyboard at once (no slide-out tail) and refocus - the chat
@@ -1800,10 +1815,17 @@ void TFTView_320x240::ui_event_chat_input_key(lv_event_t *e)
         lv_event_stop_processing(e);
     } else if (key == LV_KEY_LEFT) {
         lv_event_stop_processing(e); // nothing left of the input line
-    } else if (key == LV_KEY_UP || key == LV_KEY_DOWN || key == LV_KEY_ESC) {
-        // browse the chat history / climb down a level (input -> messages)
+    } else if (key == LV_KEY_UP || key == LV_KEY_DOWN) {
+        // browse the chat history; an empty chat keeps the focus here
         focusLastMessageBubble();
         lv_event_stop_processing(e);
+    } else if (key == LV_KEY_ESC) {
+        // climb down a level (input -> messages); with no bubble to climb
+        // to, hand the key to the screen handler so RETURN still leaves the
+        // conversation (same forwarding as ui_event_tab_page)
+        lv_event_stop_processing(e);
+        if (!focusLastMessageBubble())
+            lv_obj_send_event(objects.main_screen, LV_EVENT_KEY, lv_event_get_param(e));
     }
 }
 
@@ -1826,9 +1848,16 @@ void TFTView_320x240::ui_event_keyboard_button_key(lv_event_t *e)
         lv_event_stop_processing(e);
     } else if (key == LV_KEY_RIGHT) {
         lv_event_stop_processing(e); // nothing right of the toggle
-    } else if (key == LV_KEY_UP || key == LV_KEY_DOWN || key == LV_KEY_ESC) {
+    } else if (key == LV_KEY_UP || key == LV_KEY_DOWN) {
         focusLastMessageBubble();
         lv_event_stop_processing(e);
+    } else if (key == LV_KEY_ESC) {
+        // with no bubble to climb to, hand the key to the screen handler so
+        // RETURN still leaves the conversation (same forwarding as
+        // ui_event_tab_page)
+        lv_event_stop_processing(e);
+        if (!focusLastMessageBubble())
+            lv_obj_send_event(objects.main_screen, LV_EVENT_KEY, lv_event_get_param(e));
     }
 }
 
@@ -4957,6 +4986,31 @@ void TFTView_320x240::eraseChat(uint32_t channelOrNode)
         ILOG_WARN("eraseChat: channelOrNode %d not found", channelOrNode);
         return;
     }
+#if defined(SEEED_MESHPAGER_X2)
+    // deletion hygiene: take the keypad focus and the visibility off the
+    // doomed row before the delayed delete - otherwise the row stays a live
+    // scan target for 500 ms, and removing the focused object from the group
+    // refocuses an arbitrary (possibly hidden) member
+    lv_obj_t *doomedRow = chats.at(channelOrNode);
+    lv_obj_t *focused = defaultPanelGroup ? lv_group_get_focused(defaultPanelGroup) : NULL;
+    if (doomedRow && focused && isAncestor(doomedRow, focused)) {
+        lv_obj_t *moved = NULL;
+        uint32_t count = lv_group_get_obj_count(defaultPanelGroup);
+        for (uint32_t i = 0; i < count; i++) {
+            lv_obj_t *candidate = lv_group_get_obj_by_index(defaultPanelGroup, i);
+            if (candidate != doomedRow && isAncestor(objects.chats_panel, candidate) &&
+                !isAncestor(doomedRow, candidate) && !ancestorHidden(candidate)) {
+                lv_group_focus_obj(candidate);
+                moved = candidate;
+                break;
+            }
+        }
+        if (!moved)
+            exitPanelToNavBar(); // no other visible row: back to the nav bar
+    }
+    if (doomedRow)
+        lv_obj_add_flag(doomedRow, LV_OBJ_FLAG_HIDDEN); // invisible to every scan until the delete fires
+#endif
     if (channelOrNode < c_max_channels) {
         uint8_t ch = (uint8_t)channelOrNode;
         if (state == MeshtasticView::eRunning) {
@@ -8303,8 +8357,11 @@ void TFTView_320x240::setGroupFocus(lv_obj_t *panel)
         lv_group_focus_obj(objects.message_input_area);
     } else if (panel == objects.chats_panel) {
 #if defined(SEEED_MESHPAGER_X2)
-        // land on the first visible chat row of the scope
-        focusFirstInScope(objects.chats_panel);
+        // land on the first visible chat row of the scope; an empty list
+        // anchors the focus on the panel itself instead of bouncing to the
+        // nav bar
+        if (!focusFirstInScope(objects.chats_panel))
+            lv_group_focus_obj(objects.chats_panel);
 #else
         if (chats.size() > 0) {
             lv_group_focus_obj(panel->spec_attr->children[1]); // TODO: does not work

@@ -89,8 +89,17 @@ template <class LGFX> bool LGFXDriver<LGFX>::hasTouch(void)
 template <class LGFX> void LGFXDriver<LGFX>::task_handler(void)
 {
     // handle display timeout
+#if defined(SEEED_MESHPAGER_X2)
+    // X2: screenTimeout == 0 disables the auto-blank, but the power key blanks
+    // by backdating the activity time (~20 days). Read 0 as a 10-day timeout:
+    // unreachable by real idling, so only the explicit backdate fires this
+    // term and the blank runs the regular fade-then-sleep sequence.
+    const uint32_t blankTimeout = screenTimeout > 0 ? screenTimeout : (10u * 24 * 60 * 60 * 1000);
+    if ((lv_display_get_inactive_time(NULL) > blankTimeout) || powerSaving || (DisplayDriver::view->isScreenLocked())) {
+#else
     if ((screenTimeout > 0 && lv_display_get_inactive_time(NULL) > screenTimeout) || powerSaving ||
         (DisplayDriver::view->isScreenLocked())) {
+#endif
         // sleep screen only if there are means for wakeup
         if (DisplayDriver::view->getInputDriver()->hasPointerDevice() || hasTouch() ||
             DisplayDriver::view->getInputDriver()->hasKeyboardDevice() || hasButton()) {

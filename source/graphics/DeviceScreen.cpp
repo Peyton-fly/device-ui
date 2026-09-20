@@ -87,11 +87,6 @@ void DeviceScreen::forceWakeup(void)
     gui->getDisplayDriver()->forceWakeup();
 }
 
-void DeviceScreen::screenSaving(bool enabled)
-{
-    gui->screenSaving(enabled);
-}
-
 #if defined(ARDUINO_ARCH_ESP32)
 int DeviceScreen::prepareSleep(void *)
 {

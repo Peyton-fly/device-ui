@@ -840,6 +840,11 @@ static bool switchTabPage(lv_obj_t *from, bool forward)
                 seen++;
             }
         }
+    } else if (!forward && target < 0 && tv == objects.controller_tab_view) {
+        // X2: LEFT on the first settings page exits to the nav bar
+        // (handled by the screen key handler's LEFT branch)
+        uint32_t key = LV_KEY_LEFT;
+        lv_obj_send_event(objects.main_screen, LV_EVENT_KEY, &key);
     }
     return true;
 }

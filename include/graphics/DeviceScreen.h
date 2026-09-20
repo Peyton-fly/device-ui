@@ -34,6 +34,7 @@ class DeviceScreen
     void task_handler(void);
     void toggleDisplay(void);
     void forceWakeup(void);
+    void screenSaving(bool enabled);
 
 #if defined(ARDUINO_ARCH_ESP32)
     int prepareSleep(void *);

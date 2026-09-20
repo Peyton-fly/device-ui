@@ -123,6 +123,14 @@ time_t TFTView_320x240::startTime = 0;
 uint32_t TFTView_320x240::pinKeys = 0;
 bool TFTView_320x240::screenLocked = false;
 bool TFTView_320x240::screenUnlockRequest = false;
+TFTView_320x240::KbdSlide TFTView_320x240::kbdSlideState = TFTView_320x240::eKbdHidden;
+int32_t TFTView_320x240::kbdPanelBaseY = INT32_MIN;
+
+// file scope so a running slide can be targeted for deletion by exec callback
+static void kbdSlideAnimCB(void *var, int32_t v)
+{
+    lv_obj_set_y((lv_obj_t *)var, v);
+}
 
 TFTView_320x240 *TFTView_320x240::instance(void)
 {
@@ -495,9 +503,7 @@ void TFTView_320x240::ui_select_main_panel(lv_obj_t *b, lv_obj_t *p, lv_obj_t *t
         lv_obj_add_flag(activePanel, LV_OBJ_FLAG_HIDDEN);
         if (activePanel == objects.messages_panel) {
             lv_obj_remove_state(objects.message_input_area, LV_STATE_FOCUSED);
-            if (!lv_obj_has_flag(objects.keyboard, LV_OBJ_FLAG_HIDDEN)) {
-                hideKeyboard(objects.messages_panel);
-            }
+            resetKeyboardSlide();
             uint32_t channelOrNode = (unsigned long)activeMsgContainer->user_data;
             // remove empty messageContainer if we are leaving messages panel
             if (channelOrNode >= c_max_channels) {
@@ -507,8 +513,6 @@ void TFTView_320x240::ui_select_main_panel(lv_obj_t *b, lv_obj_t *p, lv_obj_t *t
                     activeMsgContainer = objects.messages_container;
                 }
             }
-            unreadMessages = 0; // TODO: not all messages may be actually read
-            updateUnreadMessages();
         } else if (activePanel == objects.node_options_panel) {
             // we're moving away from node options panel, so save latest settings
             storeNodeOptions();
@@ -1789,8 +1793,8 @@ bool TFTView_320x240::focusLastMessageBubble(void)
 // the keyboard, so the d-pad can walk on from there.
 void TFTView_320x240::closeKeyboardFocusInput(void)
 {
-    lv_obj_add_flag(objects.keyboard, LV_OBJ_FLAG_HIDDEN);
-    THIS->hideKeyboard(THIS->activePanel);
+    // instant close even mid-slide: hides the keyboard and restores positions
+    THIS->resetKeyboardSlide();
     lv_obj_t *ta = lv_keyboard_get_textarea(objects.keyboard);
     // the cursor follows the keypad group focus: drop it before refocusing,
     // the chat branch re-adds it by focusing the input line again
@@ -2482,6 +2486,7 @@ void TFTView_320x240::ui_event_BellButton(lv_event_t *e)
         }
         THIS->setBellText(THIS->db.uiConfig.alert_enabled, !THIS->db.silent);
         THIS->controller->storeUIConfig(THIS->db.uiConfig);
+        THIS->controller->requestRingtone();
     } else if (event_code == LV_EVENT_LONG_PRESSED) {
         ignoreClicked = true;
         if ((bool)objects.home_bell_button->user_data) {
@@ -2500,6 +2505,7 @@ void TFTView_320x240::ui_event_BellButton(lv_event_t *e)
         }
         THIS->setBellText(THIS->db.uiConfig.alert_enabled, !THIS->db.silent);
         THIS->controller->storeUIConfig(THIS->db.uiConfig);
+        THIS->controller->requestRingtone();
     }
 }
 
@@ -2670,7 +2676,7 @@ void TFTView_320x240::ui_event_KeyboardButton(lv_event_t *e)
 #endif
         switch (keyBtnIdx) {
         case 0:
-            if (lv_obj_has_flag(objects.keyboard, LV_OBJ_FLAG_HIDDEN)) {
+            if (kbdSlideState == eKbdHidden) {
                 lv_obj_remove_flag(objects.keyboard, LV_OBJ_FLAG_HIDDEN);
                 THIS->showKeyboard(objects.message_input_area);
 #if defined(SEEED_MESHPAGER_X2)
@@ -2680,7 +2686,7 @@ void TFTView_320x240::ui_event_KeyboardButton(lv_event_t *e)
 #else
                 lv_group_focus_obj(objects.message_input_area);
 #endif
-            } else {
+            } else if (kbdSlideState == eKbdShown) {
 #if defined(SEEED_MESHPAGER_X2)
                 closeKeyboardFocusInput();
 #else
@@ -2814,13 +2820,12 @@ void TFTView_320x240::ui_event_message_ready(lv_event_t *e)
             } else {
                 THIS->handleAddMessage(txt);
                 lv_textarea_set_text(objects.message_input_area, "");
-                if (!lv_obj_has_flag(objects.keyboard, LV_OBJ_FLAG_HIDDEN)) {
 #if defined(SEEED_MESHPAGER_X2)
-                    // hide at once (no slide-out tail)
-                    lv_obj_add_flag(objects.keyboard, LV_OBJ_FLAG_HIDDEN);
+                // hide at once (no slide-out tail), even mid-slide
+                THIS->resetKeyboardSlide();
+#else
+                THIS->hideKeyboard(objects.messages_panel);
 #endif
-                    THIS->hideKeyboard(objects.messages_panel);
-                }
 #if defined(SEEED_MESHPAGER_X2)
                 // after sending, land in the message list so UP/DOWN can
                 // browse the history; the input cursor goes dark with it
@@ -4999,6 +5004,7 @@ void TFTView_320x240::eraseChat(uint32_t channelOrNode)
         ILOG_WARN("eraseChat: channelOrNode %d not found", channelOrNode);
         return;
     }
+    clearUnread(channelOrNode);
 #if defined(SEEED_MESHPAGER_X2)
     // deletion hygiene: take the keypad focus and the visibility off the
     // doomed row before the delayed delete - otherwise the row stays a live
@@ -5066,6 +5072,9 @@ void TFTView_320x240::clearChatHistory(void)
     }
     chats.clear();
     messages.clear();
+    unreadByChat.clear();
+    unreadMessages = 0;
+    updateUnreadMessages();
     updateActiveChats();
     updateNodesFiltered(true);
     controller->removeTextMessages(0, 0, 0);
@@ -5101,6 +5110,7 @@ void TFTView_320x240::ui_event_ok(lv_event_t *e)
                 uint32_t numChannels = LoRaPresets::getNumChannels(region, lora.modem_preset);
                 lora.region = region;
                 lora.channel_num = (defaultSlot <= numChannels ? defaultSlot : 1);
+                lora.override_frequency = 0; // clear override frequency
                 THIS->controller->sendConfig(meshtastic_Config_LoRaConfig{lora}, THIS->ownNode);
             }
 
@@ -5199,6 +5209,7 @@ void TFTView_320x240::ui_event_ok(lv_event_t *e)
                 }
                 lora.region = region;
                 lora.channel_num = (defaultSlot <= numChannels ? defaultSlot : 1);
+                lora.override_frequency = 0; // clear override frequency
                 THIS->setChannelName(ch);
                 THIS->controller->sendConfig(meshtastic_Config_LoRaConfig{lora}, THIS->ownNode);
                 THIS->showLoRaFrequency(lora);
@@ -5222,6 +5233,7 @@ void TFTView_320x240::ui_event_ok(lv_event_t *e)
                 lora.use_preset = true;
                 lora.modem_preset = preset;
                 lora.channel_num = channelNum;
+                lora.override_frequency = 0; // clear override frequency
                 THIS->setChannelName(ch);
                 THIS->showLoRaFrequency(lora);
                 THIS->controller->sendConfig(meshtastic_Config_LoRaConfig{lora}, THIS->ownNode);
@@ -7399,17 +7411,23 @@ void TFTView_320x240::updateLoRaConfig(const meshtastic_Config_LoRaConfig &cfg)
 
 void TFTView_320x240::showLoRaFrequency(const meshtastic_Config_LoRaConfig &cfg)
 {
-    char loraFreq[48];
+    char loraFreq[64];
     if (!cfg.region) {
         strcpy(loraFreq, _("region unset"));
-    } else if (cfg.use_preset) {
-        float frequency = LoRaPresets::getRadioFreq(cfg.region, cfg.modem_preset, cfg.channel_num) + cfg.frequency_offset;
-        sprintf(loraFreq, "LoRa %g MHz\n[%s kHz]", frequency, LoRaPresets::getBandwidthString(cfg.modem_preset));
-        lv_obj_remove_state(objects.basic_settings_modem_preset_button, LV_STATE_DISABLED);
     } else {
-        float frequency = cfg.override_frequency + cfg.frequency_offset;
-        sprintf(loraFreq, "LoRa %g MHz\n[%d kHz]", frequency, cfg.bandwidth);
-        lv_obj_add_state(objects.basic_settings_modem_preset_button, LV_STATE_DISABLED);
+        // show override frequency when set, otherwise the calculated slot frequency
+        bool overridden = cfg.override_frequency != 0.0f;
+        float frequency = (overridden ? cfg.override_frequency
+                                      : LoRaPresets::getRadioFreq(cfg.region, cfg.modem_preset, cfg.channel_num)) +
+                          cfg.frequency_offset;
+        if (cfg.use_preset) {
+            sprintf(loraFreq, overridden ? "LoRa %g MHz\n[%s kHz, override]" : "LoRa %g MHz\n[%s kHz]", frequency,
+                    LoRaPresets::getBandwidthString(cfg.modem_preset));
+            lv_obj_remove_state(objects.basic_settings_modem_preset_button, LV_STATE_DISABLED);
+        } else {
+            sprintf(loraFreq, overridden ? "LoRa %g MHz\n[%d kHz, override]" : "LoRa %g MHz\n[%d kHz]", frequency, cfg.bandwidth);
+            lv_obj_add_state(objects.basic_settings_modem_preset_button, LV_STATE_DISABLED);
+        }
     }
 
     lv_label_set_text(objects.home_lora_label, loraFreq);
@@ -7699,6 +7717,15 @@ void TFTView_320x240::updateRingtone(const char rtttl[231])
         db.uiConfig.ring_tone_id = rtIndex;
     if (db.uiConfig.ring_tone_id == 0)
         db.uiConfig.ring_tone_id = 1;
+    if (db.uiConfig.ring_tone_id >= (uint32_t)numRingtones)
+        db.uiConfig.ring_tone_id = 1;
+
+    // reconcile firmware-stored ringtone with sound intent
+    bool fwSilent = (rtttl[0] == '\0' || strncmp(rtttl, ringtone[0].rtttl, 7) == 0);
+    if (db.silent != fwSilent) {
+        ILOG_WARN("ringtone divergence: silent=%d fw=%.16s -> resync", db.silent, rtttl);
+        controller->sendConfig(ringtone[db.silent ? 0 : db.uiConfig.ring_tone_id].rtttl, ownNode);
+    }
 
     // update home panel bell text
     setBellText(db.uiConfig.alert_enabled, !db.silent);
@@ -7836,6 +7863,8 @@ void TFTView_320x240::newMessage(uint32_t from, uint32_t to, uint8_t ch, const c
     if (!restore) {
         // display msg popup if not already viewing the messages
         if (container != activeMsgContainer || activePanel != objects.messages_panel) {
+            uint32_t key = (to == UINT32_MAX || from == 0) ? ch : from;
+            unreadByChat[key]++;
             unreadMessages++;
             updateUnreadMessages();
             if (activePanel != objects.messages_panel && db.uiConfig.alert_enabled &&
@@ -7844,7 +7873,7 @@ void TFTView_320x240::newMessage(uint32_t from, uint32_t to, uint8_t ch, const c
             }
             lv_obj_add_flag(container, LV_OBJ_FLAG_HIDDEN);
         }
-        if (container != activeMsgContainer)
+        if (container != activeMsgContainer || activePanel != objects.messages_panel)
             highlightChat(from, to, ch);
     } else {
         if (container != activeMsgContainer)
@@ -8173,6 +8202,10 @@ void TFTView_320x240::showMessages(uint8_t ch)
     activeMsgContainer->user_data = (void *)(uint32_t)ch;
     lv_obj_clear_flag(activeMsgContainer, LV_OBJ_FLAG_HIDDEN);
     lv_label_set_text(objects.top_group_chat_label, lv_label_get_text(channel[ch]));
+    clearUnread(ch);
+    auto it = chats.find(ch);
+    if (it != chats.end())
+        lv_obj_set_style_border_color(it->second, colorMidGray, LV_PART_MAIN | LV_STATE_DEFAULT);
     ui_set_active(objects.messages_button, objects.messages_panel, objects.top_group_chat_panel);
 }
 
@@ -8190,6 +8223,11 @@ void TFTView_320x240::showMessages(uint32_t nodeNum)
     }
     activeMsgContainer->user_data = (void *)nodeNum;
     lv_obj_clear_flag(activeMsgContainer, LV_OBJ_FLAG_HIDDEN);
+    // clear even when the node panel is gone: the chat row badge must not linger
+    clearUnread(nodeNum);
+    auto it = chats.find(nodeNum);
+    if (it != chats.end())
+        lv_obj_set_style_border_color(it->second, colorMidGray, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_t *p = nodes[nodeNum];
     if (p) {
         lv_label_set_text(objects.top_messages_node_label, lv_label_get_text(p->LV_OBJ_IDX(node_lbl_idx)));
@@ -8208,8 +8246,6 @@ void TFTView_320x240::showMessages(uint32_t nodeNum)
                                           LV_PART_MAIN | LV_STATE_DEFAULT);
             break;
         }
-        unreadMessages = 0; // TODO: not all messages may be actually read
-        updateUnreadMessages();
     } else {
         // TODO: log error
     }
@@ -8229,18 +8265,22 @@ void TFTView_320x240::showKeyboard(lv_obj_t *textArea)
     uint32_t v = lv_display_get_vertical_resolution(displaydriver->getDisplay());
 
     if (textArea == objects.message_input_area) {
+        if (kbdSlideState != eKbdHidden)
+            return;
+
         // if keyboard is to be shown in message input area then scroll the panel using animation
-        static auto panelAnimCB = [](void *var, int32_t v) { lv_obj_set_y((lv_obj_t *)var, v); };
-        static auto kbdAnimCB = [](void *var, int32_t v) { lv_obj_set_y((lv_obj_t *)var, v); };
+        static auto shown_cb = [](_lv_anim_t *) { kbdSlideState = eKbdShown; };
 
         static lv_anim_t a1;
-        lv_area_t panel_coords;
-        lv_obj_get_coords(objects.messages_panel, &panel_coords);
+        int32_t panelY = lv_obj_get_y(objects.messages_panel);
+        if (kbdPanelBaseY == INT32_MIN)
+            kbdPanelBaseY = panelY;
 
+        kbdSlideState = eKbdSliding;
         lv_anim_init(&a1);
         lv_anim_set_var(&a1, objects.messages_panel);
-        lv_anim_set_exec_cb(&a1, panelAnimCB);
-        lv_anim_set_values(&a1, panel_coords.y1, panel_coords.y1 - kb_h);
+        lv_anim_set_exec_cb(&a1, kbdSlideAnimCB);
+        lv_anim_set_values(&a1, panelY, kbdPanelBaseY - kb_h);
         lv_anim_set_duration(&a1, 300);
         lv_anim_set_path_cb(&a1, lv_anim_path_linear);
         lv_anim_start(&a1);
@@ -8248,10 +8288,11 @@ void TFTView_320x240::showKeyboard(lv_obj_t *textArea)
         static lv_anim_t a2;
         lv_anim_init(&a2);
         lv_anim_set_var(&a2, objects.keyboard);
-        lv_anim_set_exec_cb(&a2, kbdAnimCB);
+        lv_anim_set_exec_cb(&a2, kbdSlideAnimCB);
         lv_anim_set_values(&a2, v, v - kb_h);
         lv_anim_set_duration(&a2, 300);
         lv_anim_set_path_cb(&a2, lv_anim_path_linear);
+        lv_anim_set_deleted_cb(&a2, shown_cb);
         lv_anim_start(&a2);
     } else {
         if (text_coords.y1 > kb_h + 30) {
@@ -8278,20 +8319,24 @@ void TFTView_320x240::hideKeyboard(lv_obj_t *panel)
     lv_area_t kb_coords;
     lv_obj_get_coords(objects.keyboard, &kb_coords);
     uint32_t kb_h = kb_coords.y2 - kb_coords.y1;
+    uint32_t v = lv_display_get_vertical_resolution(displaydriver->getDisplay());
 
     if (panel == objects.messages_panel) {
-        static auto panelAnimCB = [](void *var, int32_t v) { lv_obj_set_y((lv_obj_t *)var, v); };
-        static auto kbdAnimCB = [](void *var, int32_t v) { lv_obj_set_y((lv_obj_t *)var, v); };
-        static auto deleted_cb = [](_lv_anim_t *) { lv_obj_add_flag(objects.keyboard, LV_OBJ_FLAG_HIDDEN); };
+        if (kbdSlideState != eKbdShown)
+            return;
+
+        static auto deleted_cb = [](_lv_anim_t *) {
+            lv_obj_add_flag(objects.keyboard, LV_OBJ_FLAG_HIDDEN);
+            kbdSlideState = eKbdHidden;
+        };
 
         static lv_anim_t a1;
-        lv_area_t panel_coords;
-        lv_obj_get_coords(panel, &panel_coords);
 
+        kbdSlideState = eKbdSliding;
         lv_anim_init(&a1);
         lv_anim_set_var(&a1, panel);
-        lv_anim_set_exec_cb(&a1, panelAnimCB);
-        lv_anim_set_values(&a1, panel_coords.y1, panel_coords.y1 + kb_h);
+        lv_anim_set_exec_cb(&a1, kbdSlideAnimCB);
+        lv_anim_set_values(&a1, lv_obj_get_y(panel), kbdPanelBaseY);
         lv_anim_set_duration(&a1, 300);
         lv_anim_set_path_cb(&a1, lv_anim_path_linear);
         lv_anim_start(&a1);
@@ -8299,13 +8344,28 @@ void TFTView_320x240::hideKeyboard(lv_obj_t *panel)
         static lv_anim_t a2;
         lv_anim_init(&a2);
         lv_anim_set_var(&a2, objects.keyboard);
-        lv_anim_set_exec_cb(&a2, kbdAnimCB);
-        lv_anim_set_values(&a2, kb_coords.y1, kb_coords.y1 + kb_h);
+        lv_anim_set_exec_cb(&a2, kbdSlideAnimCB);
+        lv_anim_set_values(&a2, lv_obj_get_y(objects.keyboard), v);
         lv_anim_set_duration(&a2, 300);
         lv_anim_set_path_cb(&a2, lv_anim_path_linear);
         lv_anim_set_deleted_cb(&a2, deleted_cb);
         lv_anim_start(&a2);
     }
+}
+
+/**
+ * @brief Put keyboard and message panel back to their rest position without animating,
+ *        e.g. when a menu button switches panels while a slide is still running.
+ */
+void TFTView_320x240::resetKeyboardSlide(void)
+{
+    lv_anim_delete(objects.messages_panel, kbdSlideAnimCB);
+    lv_anim_delete(objects.keyboard, kbdSlideAnimCB);
+    if (kbdPanelBaseY != INT32_MIN)
+        lv_obj_set_y(objects.messages_panel, kbdPanelBaseY);
+    lv_obj_set_y(objects.keyboard, lv_display_get_vertical_resolution(displaydriver->getDisplay()));
+    lv_obj_add_flag(objects.keyboard, LV_OBJ_FLAG_HIDDEN);
+    kbdSlideState = eKbdHidden;
 }
 
 lv_obj_t *TFTView_320x240::showQrCode(lv_obj_t *parent, const char *data)
@@ -8436,10 +8496,11 @@ void TFTView_320x240::cleanupAllOverlays(void)
     // Close keyboard if visible
     if (objects.keyboard && !lv_obj_has_flag(objects.keyboard, LV_OBJ_FLAG_HIDDEN)) {
 #if defined(SEEED_MESHPAGER_X2)
-        // hideKeyboard() only acts on the messages panel - hide directly here
-        lv_obj_add_flag(objects.keyboard, LV_OBJ_FLAG_HIDDEN);
-#endif
+        // instant close even mid-slide: also restores the messages panel position
+        resetKeyboardSlide();
+#else
         hideKeyboard(activePanel);
+#endif
     }
 
     // Close QR code if visible
@@ -8714,6 +8775,17 @@ void TFTView_320x240::updateAllLastHeard(void)
     nodesOnline = online;
     updateNodesFiltered(true);
     updateNodesStatus();
+}
+
+void TFTView_320x240::clearUnread(uint32_t channelOrNode)
+{
+    if (unreadByChat.erase(channelOrNode) == 0)
+        return;
+    uint32_t total = 0;
+    for (auto &u : unreadByChat)
+        total += u.second;
+    unreadMessages = total;
+    updateUnreadMessages();
 }
 
 void TFTView_320x240::updateUnreadMessages(void)

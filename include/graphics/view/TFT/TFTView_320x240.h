@@ -205,6 +205,8 @@ class TFTView_320x240 : public MeshtasticView
     virtual void updateAllLastHeard(void);
     // update image and unread messages on home screen
     virtual void updateUnreadMessages(void);
+    // clear unread count of a single chat and refresh the home screen total
+    virtual void clearUnread(uint32_t channelOrNode);
     // update time display on home screen
     virtual void updateTime(void);
     // update SD card slot info
@@ -258,6 +260,8 @@ class TFTView_320x240 : public MeshtasticView
 #endif
     void showKeyboard(lv_obj_t *textArea);
     void hideKeyboard(lv_obj_t *panel);
+    // abort a running slide animation and restore panel/keyboard position at once
+    void resetKeyboardSlide(void);
     lv_obj_t *showQrCode(lv_obj_t *parent, const char *data);
 
     void enablePanel(lv_obj_t *panel);
@@ -457,6 +461,8 @@ class TFTView_320x240 : public MeshtasticView
     lv_obj_t *activeTopPanel = nullptr;
     lv_obj_t *lastMainButton = nullptr;
     lv_obj_t *activeMsgContainer = nullptr;
+    // per-chat unread counts; key < c_max_channels means channel index, else node number
+    std::unordered_map<uint32_t, uint32_t> unreadByChat;
     lv_obj_t *activeWidget = nullptr;
     lv_obj_t *activeTextInput = nullptr;
     lv_group_t *input_group = nullptr;
@@ -491,6 +497,9 @@ class TFTView_320x240 : public MeshtasticView
     static uint32_t pinKeys;                              // number of keys pressed (lock screen)
     static bool screenLocked;                             // screen lock active
     static bool screenUnlockRequest;                      // screen unlock request (via button)
+    enum KbdSlide { eKbdHidden, eKbdSliding, eKbdShown };
+    static KbdSlide kbdSlideState; // slide state of the on-screen keyboard
+    static int32_t kbdPanelBaseY;  // messages panel y at rest (INT32_MIN: not captured yet)
     uint32_t selectedHops;                                // remember selected choice
     bool chooseNodeSignalScanner;                         // chose a target node for signal scanner
     bool chooseNodeTraceRoute;                            // chose a target node for trace route

@@ -8821,7 +8821,9 @@ void TFTView_320x240::updateLastHeard(uint32_t nodeNum)
             lv_obj_move_to_index(it->second, 1);
 
             // re-arrange the group linked list i.e. move the node after the top position
-            lv_ll_t *lv_group_ll = &lv_group_get_default()->obj_ll;
+            // (the panel group, not the runtime default: on the nav bar / in a
+            // dialog the default points elsewhere and the move would corrupt it)
+            lv_ll_t *lv_group_ll = &defaultPanelGroup->obj_ll;
             void *act = it->second->LV_OBJ_IDX(node_btn_idx)->user_data;
             if (lv_group_ll && act)
                 _lv_ll_move_before(lv_group_ll, act, _lv_ll_get_next(lv_group_ll, topNodeLL));

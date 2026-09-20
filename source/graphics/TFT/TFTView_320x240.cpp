@@ -746,6 +746,10 @@ static lv_obj_t *dropdownEscSource = NULL;
 // input-line flow). Always set right before the keyboard opens.
 static lv_obj_t *keyboardOpenerButton = NULL;
 
+// the chat row whose DEL button was just armed by a keypad long press: the
+// row's DEFOCUSED (sent before the DEL gains focus) must not hide the DEL
+static lv_obj_t *delArmedRow = NULL;
+
 // move keypad focus to the next/previous member of the default input group
 // that lives inside "focused"'s scope, wrapping symmetrically at the edges.
 // "scope_override" confines the walk to a sub-scope of the panel (the chat
@@ -1806,11 +1810,12 @@ void TFTView_320x240::closeKeyboardFocusInput(void)
         lv_group_focus_obj(ta ? ta : objects.message_input_area);
 }
 
-// X2 chat focus flow (on the one-line input): LEFT/RIGHT pair with the
-// keyboard toggle button, UP/DOWN/RETURN land in the message area, RETURN
-// with the keyboard open closes it (DOWN refocuses a visible keyboard).
-// PREPROCESS keeps the textarea class from inserting unhandled keys as
-// characters.
+// X2 chat focus flow (on the one-line input): LEFT leaves the conversation
+// for the nav bar (with the keyboard open: closes it), RIGHT pairs with the
+// keyboard toggle button, UP/DOWN land in the message area, RETURN goes back
+// to the chats list (with the keyboard open: closes it; DOWN refocuses a
+// visible keyboard). PREPROCESS keeps the textarea class from inserting
+// unhandled keys as characters.
 void TFTView_320x240::ui_event_chat_input_key(lv_event_t *e)
 {
     uint32_t key = lv_event_get_key(e);
@@ -1826,18 +1831,23 @@ void TFTView_320x240::ui_event_chat_input_key(lv_event_t *e)
         lv_group_focus_obj(objects.keyboard_button_0);
         lv_event_stop_processing(e);
     } else if (key == LV_KEY_LEFT) {
-        lv_event_stop_processing(e); // nothing left of the input line
+        // the input line is the left end of the chat: LEFT leaves the
+        // conversation for the nav bar, handed to the screen key handler
+        // (same forwarding as ui_event_tab_page)
+        lv_event_stop_processing(e);
+        if (keyboardVisible)
+            closeKeyboardFocusInput();
+        else
+            lv_obj_send_event(objects.main_screen, LV_EVENT_KEY, lv_event_get_param(e));
     } else if (key == LV_KEY_UP || key == LV_KEY_DOWN) {
         // browse the chat history; an empty chat keeps the focus here
         focusLastMessageBubble();
         lv_event_stop_processing(e);
     } else if (key == LV_KEY_ESC) {
-        // climb down a level (input -> messages); with no bubble to climb
-        // to, hand the key to the screen handler so RETURN still leaves the
-        // conversation (same forwarding as ui_event_tab_page)
+        // the input row and the message history are one level: RETURN goes
+        // straight back to the chats list (same forwarding as ui_event_tab_page)
         lv_event_stop_processing(e);
-        if (!focusLastMessageBubble())
-            lv_obj_send_event(objects.main_screen, LV_EVENT_KEY, lv_event_get_param(e));
+        lv_obj_send_event(objects.main_screen, LV_EVENT_KEY, lv_event_get_param(e));
     }
 }
 
@@ -1851,7 +1861,8 @@ void TFTView_320x240::ui_event_keyboard_key(lv_event_t *e)
 }
 
 // X2: the right end of the chat input pair - LEFT goes back to the input
-// line, UP/DOWN/RETURN land in the message area; ENTER opens the keyboard.
+// line, UP/DOWN land in the message area, RETURN goes back to the chats
+// list; ENTER opens the keyboard.
 void TFTView_320x240::ui_event_keyboard_button_key(lv_event_t *e)
 {
     uint32_t key = lv_event_get_key(e);
@@ -1864,12 +1875,10 @@ void TFTView_320x240::ui_event_keyboard_button_key(lv_event_t *e)
         focusLastMessageBubble();
         lv_event_stop_processing(e);
     } else if (key == LV_KEY_ESC) {
-        // with no bubble to climb to, hand the key to the screen handler so
-        // RETURN still leaves the conversation (same forwarding as
-        // ui_event_tab_page)
+        // the input row and the message history are one level: RETURN goes
+        // straight back to the chats list (same forwarding as ui_event_tab_page)
         lv_event_stop_processing(e);
-        if (!focusLastMessageBubble())
-            lv_obj_send_event(objects.main_screen, LV_EVENT_KEY, lv_event_get_param(e));
+        lv_obj_send_event(objects.main_screen, LV_EVENT_KEY, lv_event_get_param(e));
     }
 }
 
@@ -2282,9 +2291,27 @@ void TFTView_320x240::ui_event_ChatButton(lv_event_t *e)
         ignoreClicked = true;
         lv_obj_t *delBtn = target->LV_OBJ_IDX(1);
         lv_obj_clear_flag(delBtn, LV_OBJ_FLAG_HIDDEN);
+#if defined(SEEED_MESHPAGER_X2)
+        // X2: put the focus ring on the DEL; swallow this press's release so
+        // its CLICK cannot land on the freshly focused DEL (that would delete
+        // the chat), and clear ignoreClicked here since no CLICKED will
+        // arrive to do it
+        delArmedRow = target;
+        lv_indev_wait_release(lv_indev_get_act());
+        lv_obj_remove_state(target, LV_STATE_PRESSED);
+        ignoreClicked = false;
+        lv_group_focus_obj(delBtn);
+#endif
     } else if (event_code == LV_EVENT_DEFOCUSED || event_code == LV_EVENT_LEAVE) {
         lv_obj_t *delBtn = target->LV_OBJ_IDX(1);
-        lv_obj_add_flag(delBtn, LV_OBJ_FLAG_HIDDEN);
+#if defined(SEEED_MESHPAGER_X2)
+        // X2: the defocus sent while the focus moves onto this row's own DEL
+        // (see the long-press branch) must not hide it again
+        if (delArmedRow == target) {
+            delArmedRow = NULL;
+        } else
+#endif
+            lv_obj_add_flag(delBtn, LV_OBJ_FLAG_HIDDEN);
     } else if (event_code == LV_EVENT_CLICKED) {
         if (ignoreClicked) { // prevent long press to enter this setting
             ignoreClicked = false;
@@ -2334,6 +2361,23 @@ void TFTView_320x240::ui_event_ChatDelButton(lv_event_t *e)
         }
     }
 }
+
+#if defined(SEEED_MESHPAGER_X2)
+// X2: the per-row DEL button a keypad long press shows: RETURN dismisses it
+// and puts the focus back on the row; losing the focus hides it again.
+static void ui_event_chat_del_key(lv_event_t *e)
+{
+    lv_event_code_t event_code = lv_event_get_code(e);
+    lv_obj_t *target = lv_event_get_target_obj(e);
+    if (event_code == LV_EVENT_KEY && lv_event_get_key(e) == LV_KEY_ESC) {
+        lv_obj_add_flag(target, LV_OBJ_FLAG_HIDDEN);
+        lv_group_focus_obj(lv_obj_get_parent(target));
+        lv_event_stop_processing(e);
+    } else if (event_code == LV_EVENT_DEFOCUSED) {
+        lv_obj_add_flag(target, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+#endif
 
 /**
  * @brief hide msgPopupPanel on touch; goto message on button press
@@ -5011,6 +5055,8 @@ void TFTView_320x240::eraseChat(uint32_t channelOrNode)
     // scan target for 500 ms, and removing the focused object from the group
     // refocuses an arbitrary (possibly hidden) member
     lv_obj_t *doomedRow = chats.at(channelOrNode);
+    if (delArmedRow == doomedRow)
+        delArmedRow = NULL; // its DEL can no longer receive the focus jump
     lv_obj_t *focused = defaultPanelGroup ? lv_group_get_focused(defaultPanelGroup) : NULL;
     if (doomedRow && focused && isAncestor(doomedRow, focused)) {
         lv_obj_t *moved = NULL;
@@ -8083,6 +8129,9 @@ void TFTView_320x240::addChat(uint32_t from, uint32_t to, uint8_t ch)
             lv_obj_set_style_align(obj, LV_ALIGN_RIGHT_MID, LV_PART_MAIN | LV_STATE_DEFAULT);
             lv_obj_set_style_bg_color(obj, colorDarkRed, LV_PART_MAIN | LV_STATE_DEFAULT);
             lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
+#if defined(SEEED_MESHPAGER_X2)
+            applyKeyFocusStyle(obj); // focus ring for the keypad DEL flow
+#endif
             {
                 lv_obj_t *parent_obj = obj;
                 {
@@ -8106,6 +8155,37 @@ void TFTView_320x240::addChat(uint32_t from, uint32_t to, uint8_t ch)
 
     lv_obj_add_event_cb(chatBtn, ui_event_ChatButton, LV_EVENT_ALL, (void *)index);
     lv_obj_add_event_cb(chatDelBtn, ui_event_ChatDelButton, LV_EVENT_CLICKED, (void *)index);
+#if defined(SEEED_MESHPAGER_X2)
+    // X2: keypad flow on the DEL button (RETURN dismisses it)
+    lv_obj_add_event_cb(chatDelBtn, ui_event_chat_del_key, KEY_PREPROCESS, NULL);
+    lv_obj_add_event_cb(chatDelBtn, ui_event_chat_del_key, LV_EVENT_DEFOCUSED, NULL);
+
+    // X2: keep the focus group in visual order - the chat list shows the
+    // newest row on top while the group appends in creation order, which
+    // inverts UP/DOWN and lands the entry focus on the oldest row (same LL
+    // sync the nodes panel does in updateLastHeard). The first chat (map
+    // holds just this row) needs no move: its DEL is appended right after it.
+    if (chats.size() > 1) {
+        lv_ll_t *ll = &defaultPanelGroup->obj_ll;
+        lv_obj_t *prevTop = lv_obj_get_child(objects.chats_panel, 1);
+        void *rowNode = NULL, *delNode = NULL, *topNode = NULL;
+        for (lv_obj_t **n = (lv_obj_t **)_lv_ll_get_head(ll); n != NULL;
+             n = (lv_obj_t **)_lv_ll_get_next(ll, n)) {
+            if (*n == chatBtn)
+                rowNode = n;
+            else if (*n == chatDelBtn)
+                delNode = n;
+            else if (prevTop && *n == prevTop)
+                topNode = n;
+        }
+        if (rowNode && delNode && topNode) {
+            // pair the DEL with its row, then put the pair before the
+            // previous top row: [chatBtn, chatDelBtn, prevTop, ...]
+            _lv_ll_move_before(ll, delNode, topNode);
+            _lv_ll_move_before(ll, rowNode, delNode);
+        }
+    }
+#endif
 }
 
 void TFTView_320x240::highlightChat(uint32_t from, uint32_t to, uint8_t ch)

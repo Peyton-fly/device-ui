@@ -976,6 +976,9 @@ void TFTView_320x240::apply_hotfix(void)
     lv_obj_clear_flag(objects.snr_slider, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_clear_flag(objects.rssi_slider, LV_OBJ_FLAG_CLICKABLE);
 
+    // one step of the timeout slider is 5 s; the read sites multiply by 5
+    lv_slider_set_range(objects.screen_timeout_slider, 0, 180);
+
     // restore the key event bubbling the generated layer of this lineage lacks
     addKeyBubbleFlags(objects.main_screen);
     addKeyBubbleFlags(objects.boot_screen);
@@ -3008,7 +3011,12 @@ void TFTView_320x240::ui_event_timeout_button(lv_event_t *e)
             lv_snprintf(buf, sizeof(buf), _("Timeout: %ds"), timeout);
         lv_label_set_text(objects.settings_screen_timeout_label, buf);
         lv_obj_clear_flag(objects.settings_screen_timeout_panel, LV_OBJ_FLAG_HIDDEN);
+#if defined(SEEED_MESHPAGER_X2)
+        // one step of the slider is 5 s
+        lv_slider_set_value(objects.screen_timeout_slider, timeout / 5, LV_ANIM_OFF);
+#else
         lv_slider_set_value(objects.screen_timeout_slider, timeout, LV_ANIM_OFF);
+#endif
         lv_group_focus_obj(objects.screen_timeout_slider);
         THIS->disablePanel(objects.controller_panel);
         THIS->disablePanel(objects.tab_page_basic_settings);
@@ -5280,9 +5288,14 @@ void TFTView_320x240::ui_event_ok(lv_event_t *e)
             break;
         }
         case eScreenTimeout: {
+#if defined(SEEED_MESHPAGER_X2)
+            // one step of the slider is 5 s
+            uint32_t value = (uint32_t)lv_slider_get_value(objects.screen_timeout_slider) * 5;
+#else
             uint32_t value = lv_slider_get_value(objects.screen_timeout_slider);
             if (value > 5)
                 value -= value % 5;
+#endif
             if (value != THIS->db.uiConfig.screen_timeout) {
                 THIS->setTimeout(value);
                 THIS->db.uiConfig.screen_timeout = value;
@@ -5647,9 +5660,14 @@ void TFTView_320x240::ui_event_screen_timeout_slider(lv_event_t *e)
 {
     lv_obj_t *slider = lv_event_get_target_obj(e);
     char buf[20];
+#if defined(SEEED_MESHPAGER_X2)
+    // one step of the slider is 5 s
+    uint32_t value = (uint32_t)lv_slider_get_value(slider) * 5;
+#else
     uint32_t value = lv_slider_get_value(slider);
     if (value > 5)
         value -= value % 5;
+#endif
     if (value == 0)
         lv_snprintf(buf, sizeof(buf), _("Timeout: off"));
     else

@@ -662,6 +662,28 @@ static void applyKeyFocusStyle(lv_obj_t *obj)
     lv_obj_add_style(obj, &style_key_focus, LV_PART_MAIN | LV_STATE_FOCUS_KEY);
 }
 
+/*
+ * Yellow focus ring for the canned message picker rows: the picker's blue
+ * panel base swallows the stock blue ring, so the selected phrase would be
+ * indistinguishable from the rest.
+ */
+static lv_style_t style_canned_row_focus;
+static bool style_canned_row_focus_ready = false;
+
+static void applyCannedRowFocusStyle(lv_obj_t *obj)
+{
+    if (!style_canned_row_focus_ready) {
+        lv_style_init(&style_canned_row_focus);
+        lv_style_set_border_width(&style_canned_row_focus, 3);
+        lv_style_set_border_color(&style_canned_row_focus, lv_color_hex(0xffc107));
+        lv_style_set_border_opa(&style_canned_row_focus, LV_OPA_COVER);
+        lv_style_set_border_side(&style_canned_row_focus, LV_BORDER_SIDE_FULL);
+        lv_style_set_outline_width(&style_canned_row_focus, 0);
+        style_canned_row_focus_ready = true;
+    }
+    lv_obj_add_style(obj, &style_canned_row_focus, LV_PART_MAIN | LV_STATE_FOCUS_KEY);
+}
+
 static void addKeyFocusStyles(void)
 {
     uint32_t group_count = lv_group_get_count();
@@ -986,11 +1008,11 @@ void TFTView_320x240::apply_hotfix(void)
     // chat focus flow: LEFT/RIGHT pair the input line with the keyboard
     // toggle, UP/DOWN browse the history, RETURN climbs down level by level
     lv_obj_add_event_cb(objects.message_input_area, ui_event_chat_input_key, KEY_PREPROCESS, NULL);
-    // X2 chat input: ENTER never reaches the one-line textarea class (it sends
-    // on press); short press opens the canned message picker, long press sends.
-    lv_obj_add_event_cb(objects.message_input_area, ui_event_canned_input_key, LV_EVENT_KEY, NULL);
+    // X2 chat input: ENTER sends on key press through the one-line textarea
+    // class; the canned picker opens on short press only when the press did
+    // not already send (KEY_PREPROCESS runs before the class handler).
+    lv_obj_add_event_cb(objects.message_input_area, ui_event_canned_input_key, KEY_PREPROCESS, NULL);
     lv_obj_add_event_cb(objects.message_input_area, ui_event_canned_open, LV_EVENT_SHORT_CLICKED, NULL);
-    lv_obj_add_event_cb(objects.message_input_area, ui_event_canned_send, LV_EVENT_LONG_PRESSED, NULL);
     lv_obj_add_event_cb(objects.keyboard_button_0, ui_event_keyboard_button_key, KEY_PREPROCESS, NULL);
     lv_obj_add_event_cb(objects.keyboard, ui_event_keyboard_key, KEY_PREPROCESS, NULL);
 
@@ -1878,42 +1900,33 @@ void TFTView_320x240::updateCannedMessages(const char *messages)
         hideCannedMessagesPanel();
 }
 
-// X2: swallow ENTER on the chat input line so the one-line textarea class
-// cannot send on key press; the press duration decides in the handlers below.
+// X2: ENTER on the chat input line sends on key press (one-line textarea
+// class), which clears the text before SHORT_CLICKED runs. Snapshot whether
+// the line had text when the press began, before the class can clear it.
 void TFTView_320x240::ui_event_canned_input_key(lv_event_t *e)
 {
     if (lv_event_get_key(e) != LV_KEY_ENTER)
         return;
-    bool keyboardVisible = !lv_obj_has_flag(objects.keyboard, LV_OBJ_FLAG_HIDDEN);
-    if (keyboardVisible || THIS->cannedPanel)
-        return;
-    lv_event_stop_processing(e);
+    THIS->cannedInputHadText = lv_textarea_get_text(objects.message_input_area)[0] != '\0';
 }
 
-// X2: short-press ENTER on the chat input line opens the canned message picker.
+// X2: short-press ENTER on the chat input line opens the canned message
+// picker - unless the press already sent the text that was in the line.
 void TFTView_320x240::ui_event_canned_open(lv_event_t *e)
 {
     bool keyboardVisible = !lv_obj_has_flag(objects.keyboard, LV_OBJ_FLAG_HIDDEN);
     if (keyboardVisible || THIS->cannedPanel)
         return;
+    if (THIS->cannedInputHadText) {
+        THIS->cannedInputHadText = false;
+        return;
+    }
     if (THIS->cannedMessages[0] == '\0') {
         // nothing cached: re-pull, the response lands via updateCannedMessages
         THIS->controller->requestCannedMessages();
         return;
     }
     THIS->showCannedMessagesPanel();
-}
-
-// X2: long-press ENTER on the chat input line sends through the input line's
-// regular READY chain.
-void TFTView_320x240::ui_event_canned_send(lv_event_t *e)
-{
-    bool keyboardVisible = !lv_obj_has_flag(objects.keyboard, LV_OBJ_FLAG_HIDDEN);
-    if (keyboardVisible || THIS->cannedPanel)
-        return;
-    if (lv_textarea_get_text(objects.message_input_area)[0] == '\0')
-        return;
-    lv_obj_send_event(objects.message_input_area, LV_EVENT_READY, nullptr);
 }
 
 // X2: build the canned message picker rows from the '|'-separated cache.
@@ -1944,7 +1957,7 @@ void TFTView_320x240::showCannedMessagesPanel(void)
         lv_obj_set_width(row, lv_pct(100));
         lv_obj_set_height(row, LV_SIZE_CONTENT);
         lv_obj_add_flag(row, LV_OBJ_FLAG_EVENT_BUBBLE);
-        applyKeyFocusStyle(row);
+        applyCannedRowFocusStyle(row);
         lv_obj_t *label = lv_label_create(row);
         lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
         lv_label_set_text(label, token);
@@ -1974,7 +1987,7 @@ void TFTView_320x240::ui_event_canned_panel_key(lv_event_t *e)
 }
 
 // X2: a picker row was picked: fill the input line and hand focus back (the
-// message is sent by a long press on the input line).
+// message is then sent by a short press on the input line).
 void TFTView_320x240::ui_event_canned_phrase_row(lv_event_t *e)
 {
     if (lv_event_get_code(e) != LV_EVENT_CLICKED)

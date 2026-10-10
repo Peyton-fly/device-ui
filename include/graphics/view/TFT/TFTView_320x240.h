@@ -441,11 +441,10 @@ class TFTView_320x240 : public MeshtasticView
     static void ui_event_keyboard_button_key(lv_event_t *e);
     static bool focusLastMessageBubble(void);
     static void closeKeyboardFocusInput(void);
-    // X2 canned message picker: short press on the chat input line opens it,
-    // long press sends; picking a row fills the input line.
+    // X2 canned message picker: short press on an empty chat input line opens
+    // it, short press with text sends; picking a row fills the input line.
     static void ui_event_canned_input_key(lv_event_t *e);
     static void ui_event_canned_open(lv_event_t *e);
-    static void ui_event_canned_send(lv_event_t *e);
     static void ui_event_canned_panel_key(lv_event_t *e);
     static void ui_event_canned_phrase_row(lv_event_t *e);
 #endif
@@ -527,6 +526,7 @@ class TFTView_320x240 : public MeshtasticView
 #if defined(SEEED_MESHPAGER_X2)
     lv_obj_t *cannedPanel = nullptr;                      // canned message picker overlay
     char cannedMessages[201] = {0};                       // '|'-separated phrases from the admin API
+    bool cannedInputHadText = false;                      // chat input had text when ENTER was pressed down
 #endif
     std::unordered_map<uint32_t, lv_obj_t *> nodeObjects; // nodeObjects displayed on map
     // extended default device profile struct with additional required data

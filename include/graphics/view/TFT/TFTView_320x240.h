@@ -441,9 +441,11 @@ class TFTView_320x240 : public MeshtasticView
     static void ui_event_keyboard_button_key(lv_event_t *e);
     static bool focusLastMessageBubble(void);
     static void closeKeyboardFocusInput(void);
-    // X2 canned message picker: long-press ENTER on the chat input line opens
-    // it; short tap on a row fills the input, long press sends at once.
+    // X2 canned message picker: short press on the chat input line opens it,
+    // long press sends; picking a row fills the input line.
+    static void ui_event_canned_input_key(lv_event_t *e);
     static void ui_event_canned_open(lv_event_t *e);
+    static void ui_event_canned_send(lv_event_t *e);
     static void ui_event_canned_panel_key(lv_event_t *e);
     static void ui_event_canned_phrase_row(lv_event_t *e);
 #endif

@@ -161,6 +161,13 @@ uint32_t ViewController::requestRingtone(uint32_t nodeId)
                             nodeId ? nodeId : myNodeNum);
 }
 
+uint32_t ViewController::requestCannedMessages(uint32_t nodeId)
+{
+    return sendAdminMessage(meshtastic_AdminMessage{.which_payload_variant = meshtastic_AdminMessage_get_canned_message_module_messages_request_tag,
+                                                    .get_canned_message_module_messages_request = true},
+                            nodeId ? nodeId : myNodeNum);
+}
+
 /**
  * Request specific device config block
  */
@@ -620,6 +627,7 @@ void ViewController::requestConfig(void)
 void ViewController::requestAdditionalConfig(void)
 {
     requestRingtone(myNodeNum);
+    requestCannedMessages(myNodeNum);
 }
 
 /**
@@ -1129,6 +1137,10 @@ bool ViewController::packetReceived(const meshtastic_MeshPacket &p)
             }
             case meshtastic_AdminMessage_get_ringtone_response_tag: {
                 view->updateRingtone(admin.get_ringtone_response);
+                break;
+            }
+            case meshtastic_AdminMessage_get_canned_message_module_messages_response_tag: {
+                view->updateCannedMessages(admin.get_canned_message_module_messages_response);
                 break;
             }
             case meshtastic_AdminMessage_set_channel_tag: {

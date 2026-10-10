@@ -119,6 +119,8 @@ class MeshtasticView : public DeviceGUI
     virtual void updatePaxCounterModule(const meshtastic_ModuleConfig_PaxcounterConfig &cfg) {}
     virtual void updateFileinfo(const meshtastic_FileInfo &fileinfo) {}
     virtual void updateRingtone(const char rtttl[231]) {}
+    // '|'-separated canned message phrases from the canned message module
+    virtual void updateCannedMessages(const char messages[201]) {}
 
     virtual void configCompleted(void)
     {

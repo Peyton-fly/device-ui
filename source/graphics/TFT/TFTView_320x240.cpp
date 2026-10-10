@@ -986,6 +986,8 @@ void TFTView_320x240::apply_hotfix(void)
     // chat focus flow: LEFT/RIGHT pair the input line with the keyboard
     // toggle, UP/DOWN browse the history, RETURN climbs down level by level
     lv_obj_add_event_cb(objects.message_input_area, ui_event_chat_input_key, KEY_PREPROCESS, NULL);
+    // long-press ENTER on the chat input line opens the canned message picker
+    lv_obj_add_event_cb(objects.message_input_area, ui_event_canned_open, LV_EVENT_LONG_PRESSED, NULL);
     lv_obj_add_event_cb(objects.keyboard_button_0, ui_event_keyboard_button_key, KEY_PREPROCESS, NULL);
     lv_obj_add_event_cb(objects.keyboard, ui_event_keyboard_key, KEY_PREPROCESS, NULL);
 
@@ -1862,6 +1864,112 @@ void TFTView_320x240::ui_event_chat_input_key(lv_event_t *e)
         lv_event_stop_processing(e);
         lv_obj_send_event(objects.main_screen, LV_EVENT_KEY, lv_event_get_param(e));
     }
+}
+
+// X2: cache the canned phrases fetched over the admin API.
+void TFTView_320x240::updateCannedMessages(const char *messages)
+{
+    strncpy(cannedMessages, messages, sizeof(cannedMessages) - 1);
+    cannedMessages[sizeof(cannedMessages) - 1] = '\0';
+    if (cannedPanel) // data changed: the open picker is stale, reopen manually
+        hideCannedMessagesPanel();
+}
+
+// X2: long-press ENTER on the chat input line opens the canned message picker.
+void TFTView_320x240::ui_event_canned_open(lv_event_t *e)
+{
+    bool keyboardVisible = !lv_obj_has_flag(objects.keyboard, LV_OBJ_FLAG_HIDDEN);
+    if (keyboardVisible || THIS->cannedPanel)
+        return;
+    if (THIS->cannedMessages[0] == '\0') {
+        // nothing cached: re-pull, the response lands via updateCannedMessages
+        THIS->controller->requestCannedMessages();
+        return;
+    }
+    THIS->showCannedMessagesPanel();
+    // keypad: swallow the release and clear the pressed state (focus moves
+    // to the first row mid-press)
+    lv_indev_wait_release(lv_indev_get_act());
+    lv_obj_remove_state(objects.message_input_area, LV_STATE_PRESSED);
+}
+
+// X2: build the canned message picker rows from the '|'-separated cache.
+void TFTView_320x240::showCannedMessagesPanel(void)
+{
+    // rows join the panel content group like the chat bubbles
+    GroupGuard group_guard(defaultPanelGroup);
+
+    cannedPanel = lv_obj_create(objects.main_screen);
+    lv_obj_set_pos(cannedPanel, 39, 25);
+    lv_obj_set_size(cannedPanel, LV_PCT(88), LV_PCT(90));
+    add_style_settings_panel_style(cannedPanel);
+    lv_obj_add_event_cb(cannedPanel, ui_event_canned_panel_key, LV_EVENT_KEY, NULL);
+    disablePanel(objects.messages_panel);
+
+    char buf[201];
+    strncpy(buf, cannedMessages, sizeof(buf) - 1);
+    buf[sizeof(buf) - 1] = '\0';
+    lv_obj_t *firstRow = NULL;
+    for (char *token = strtok(buf, "|"); token; token = strtok(NULL, "|")) {
+        if (!*token)
+            continue;
+        lv_obj_t *row = lv_button_create(cannedPanel);
+        lv_obj_set_width(row, lv_pct(100));
+        lv_obj_set_height(row, LV_SIZE_CONTENT);
+        lv_obj_add_flag(row, LV_OBJ_FLAG_EVENT_BUBBLE);
+        applyKeyFocusStyle(row);
+        lv_obj_t *label = lv_label_create(row);
+        lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+        lv_label_set_text(label, token);
+        lv_obj_add_event_cb(row, ui_event_canned_phrase_row, LV_EVENT_ALL, NULL);
+        if (!firstRow)
+            firstRow = row;
+    }
+    if (firstRow)
+        lv_group_focus_obj(firstRow);
+}
+
+// X2: keypad control inside the canned message picker. All keys stay inside
+// the picker; ENTER is stopped too, the row's click fires from the release.
+void TFTView_320x240::ui_event_canned_panel_key(lv_event_t *e)
+{
+    uint32_t key = lv_event_get_key(e);
+    if (key == LV_KEY_UP || key == LV_KEY_DOWN) {
+        navigateScope(lv_event_get_target_obj(e), key == LV_KEY_DOWN, THIS->cannedPanel);
+        lv_event_stop_processing(e);
+    } else if (key == LV_KEY_ESC || key == LV_KEY_LEFT) {
+        THIS->hideCannedMessagesPanel();
+        lv_group_focus_obj(objects.message_input_area);
+        lv_event_stop_processing(e);
+    } else if (key == LV_KEY_RIGHT || key == LV_KEY_ENTER) {
+        lv_event_stop_processing(e);
+    }
+}
+
+// X2: a picker row was tapped (fill the input line) or long-pressed (fill
+// and send through the input line's regular READY chain).
+void TFTView_320x240::ui_event_canned_phrase_row(lv_event_t *e)
+{
+    lv_event_code_t code = lv_event_get_code(e);
+    if (code != LV_EVENT_CLICKED && code != LV_EVENT_LONG_PRESSED)
+        return;
+    lv_obj_t *row = lv_event_get_target_obj(e);
+    const char *text = lv_label_get_text(lv_obj_get_child(row, 0));
+    THIS->hideCannedMessagesPanel();
+    lv_textarea_set_text(objects.message_input_area, text);
+    lv_group_focus_obj(objects.message_input_area);
+    if (code == LV_EVENT_LONG_PRESSED) {
+        lv_obj_send_event(objects.message_input_area, LV_EVENT_READY, nullptr);
+        lv_event_stop_processing(e);
+    }
+}
+
+// X2: close the canned message picker and hand the chat panel back.
+void TFTView_320x240::hideCannedMessagesPanel(void)
+{
+    enablePanel(objects.messages_panel);
+    lv_obj_delete_async(cannedPanel);
+    cannedPanel = nullptr;
 }
 
 // X2: on the keyboard, RETURN closes it and goes back to the input line.
@@ -8594,6 +8702,11 @@ void TFTView_320x240::cleanupAllOverlays(void)
 #else
         hideKeyboard(activePanel);
 #endif
+    }
+
+    // Close canned message picker if open
+    if (cannedPanel) {
+        hideCannedMessagesPanel();
     }
 
     // Close QR code if visible

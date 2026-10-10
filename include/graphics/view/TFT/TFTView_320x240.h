@@ -89,6 +89,10 @@ class TFTView_320x240 : public MeshtasticView
     void updatePaxCounterModule(const meshtastic_ModuleConfig_PaxcounterConfig &cfg) override {}
     void updateFileinfo(const meshtastic_FileInfo &fileinfo) override {}
     void updateRingtone(const char rtttl[231]) override;
+#if defined(SEEED_MESHPAGER_X2)
+    // cache the canned phrases fetched over the admin API
+    void updateCannedMessages(const char messages[201]) override;
+#endif
 
     // update internal time
     void updateTime(uint32_t time) override;
@@ -171,6 +175,11 @@ class TFTView_320x240 : public MeshtasticView
     virtual void hideMessagePopup(void);
     // display user widget (dynamically created)
     void showUserWidget(UserWidgetFunc createWidget);
+#if defined(SEEED_MESHPAGER_X2)
+    // show/hide the canned message picker overlay (dynamically created)
+    void showCannedMessagesPanel(void);
+    void hideCannedMessagesPanel(void);
+#endif
     // display messages of a group channel
     virtual void addChat(uint32_t from, uint32_t to, uint8_t ch);
     // mark chat border to indicate a new message
@@ -432,6 +441,11 @@ class TFTView_320x240 : public MeshtasticView
     static void ui_event_keyboard_button_key(lv_event_t *e);
     static bool focusLastMessageBubble(void);
     static void closeKeyboardFocusInput(void);
+    // X2 canned message picker: long-press ENTER on the chat input line opens
+    // it; short tap on a row fills the input, long press sends at once.
+    static void ui_event_canned_open(lv_event_t *e);
+    static void ui_event_canned_panel_key(lv_event_t *e);
+    static void ui_event_canned_phrase_row(lv_event_t *e);
 #endif
 
     static void ui_event_ok(lv_event_t *e);
@@ -508,6 +522,10 @@ class TFTView_320x240 : public MeshtasticView
     meshtastic_Channel *channel_scratch;                  // temporary scratch copy of channel db
     lv_obj_t *qr;                                         // qr code
     MapPanel *map = nullptr;                              // map
+#if defined(SEEED_MESHPAGER_X2)
+    lv_obj_t *cannedPanel = nullptr;                      // canned message picker overlay
+    char cannedMessages[201] = {0};                       // '|'-separated phrases from the admin API
+#endif
     std::unordered_map<uint32_t, lv_obj_t *> nodeObjects; // nodeObjects displayed on map
     // extended default device profile struct with additional required data
     struct meshtastic_DeviceProfile_ext : meshtastic_DeviceProfile {

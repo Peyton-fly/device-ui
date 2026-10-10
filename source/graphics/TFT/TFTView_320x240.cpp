@@ -782,7 +782,8 @@ static bool navigateScope(lv_obj_t *focused, bool next, lv_obj_t *scope_override
             continue;
         // skip the scope itself so row navigation never parks on the panel
         // anchor (chats_panel); from the anchor UP/DOWN still reach the rows
-        if (candidate != scope && isAncestor(scope, candidate) && !ancestorHidden(candidate)) {
+        if (candidate != scope && isAncestor(scope, candidate) && !ancestorHidden(candidate) &&
+            !lv_obj_has_state(candidate, LV_STATE_DISABLED)) {
             lv_group_focus_obj(candidate);
             return true;
         }
@@ -803,12 +804,24 @@ static bool focusFirstInScope(lv_obj_t *scope)
         // skip the scope itself: a group-member scope (chats_panel, map_panel)
         // precedes every dynamically created row in add order and must not
         // win the scan over them
-        if (candidate != scope && isAncestor(scope, candidate) && !ancestorHidden(candidate)) {
+        if (candidate != scope && isAncestor(scope, candidate) && !ancestorHidden(candidate) &&
+            !lv_obj_has_state(candidate, LV_STATE_DISABLED)) {
             lv_group_focus_obj(candidate);
             return true;
         }
     }
     return false;
+}
+
+// LVGL drops every key event addressed to a focused LV_STATE_DISABLED object,
+// so when a control is disabled while it holds the focus, move it along.
+static void avoidDisabledFocus(lv_obj_t *obj)
+{
+    lv_group_t *group = lv_group_get_default();
+    if (!group || !obj || lv_group_get_focused(group) != obj)
+        return;
+    if (!focusFirstInScope(scopeOf(obj)))
+        lv_group_focus_next(group); // last resort: any eligible member
 }
 
 // switch to the neighboring tab of the tabview owning "from" and focus the
@@ -8982,6 +8995,9 @@ bool TFTView_320x240::updateSDCard(void)
         Themes::recolorText(objects.home_sd_card_label, false);
         // allow backup/restore only if there is an SD card detected
         lv_obj_add_state(objects.basic_settings_backup_restore_button, LV_STATE_DISABLED);
+#if defined(SEEED_MESHPAGER_X2)
+        avoidDisabledFocus(objects.basic_settings_backup_restore_button);
+#endif
     } else {
 #if defined(SENSECAP_INDICATOR)
         // backup/restore writes locally, which the bridged SD does not support yet
@@ -9131,6 +9147,9 @@ void TFTView_320x240::ejectSDCard(void)
     Themes::recolorButton(objects.home_sd_card_button, false);
     Themes::recolorText(objects.home_sd_card_label, false);
     lv_obj_add_state(objects.basic_settings_backup_restore_button, LV_STATE_DISABLED);
+#if defined(SEEED_MESHPAGER_X2)
+    avoidDisabledFocus(objects.basic_settings_backup_restore_button);
+#endif
 #endif
 }
 

@@ -1317,6 +1317,8 @@ void TFTView_320x240::ui_events_init(void)
     lv_obj_add_event_cb(objects.basic_settings_reset_button, ui_event_reset_button, LV_EVENT_CLICKED, NULL);
     lv_obj_add_event_cb(objects.basic_settings_reboot_button, ui_event_reboot_button, LV_EVENT_CLICKED, NULL);
     lv_obj_add_event_cb(objects.basic_settings_about_button, ui_event_about_button, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(objects.basic_settings_pos_broadcast_button, ui_event_pos_broadcast_button, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(objects.basic_settings_gps_poll_button, ui_event_gps_poll_button, LV_EVENT_CLICKED, NULL);
 
     lv_obj_add_event_cb(objects.reboot_button, ui_event_device_reboot_button, LV_EVENT_CLICKED, NULL);
     lv_obj_add_event_cb(objects.progmode_button, ui_event_device_progmode_button, LV_EVENT_ALL, NULL);
@@ -1371,6 +1373,10 @@ void TFTView_320x240::ui_events_init(void)
     lv_obj_add_event_cb(objects.obj21__cancel_button_w, ui_event_cancel, LV_EVENT_CLICKED, 0);
     lv_obj_add_event_cb(objects.obj27__ok_button_w, ui_event_ok, LV_EVENT_CLICKED, 0);
     lv_obj_add_event_cb(objects.obj27__cancel_button_w, ui_event_cancel, LV_EVENT_CLICKED, 0);
+    lv_obj_add_event_cb(objects.obj28__ok_button_w, ui_event_ok, LV_EVENT_CLICKED, 0);
+    lv_obj_add_event_cb(objects.obj28__cancel_button_w, ui_event_cancel, LV_EVENT_CLICKED, 0);
+    lv_obj_add_event_cb(objects.obj29__ok_button_w, ui_event_ok, LV_EVENT_CLICKED, 0);
+    lv_obj_add_event_cb(objects.obj29__cancel_button_w, ui_event_cancel, LV_EVENT_CLICKED, 0);
 
     // modify channel buttons
     lv_obj_add_event_cb(objects.settings_channel0_button, ui_event_modify_channel, LV_EVENT_ALL, (void *)0);
@@ -3108,6 +3114,82 @@ void TFTView_320x240::ui_event_wifi_button(lv_event_t *e)
         THIS->disablePanel(objects.controller_panel);
         THIS->disablePanel(objects.tab_page_basic_settings);
         THIS->activeSettings = eWifi;
+    }
+}
+
+// whitelist values shared with the BaseUI position menus (MenuHandler.cpp)
+static const uint32_t posBroadcastValues[] = {60,     90,    300,   900,   3600,  7200,  10800, 14400,
+                                              18000,  21600, 43200, 64800, 86400, 129600, 172800, 259200};
+static const uint32_t gpsPollValues[] = {8, 20, 40, 60, 80, 120, 300, 600, 900, 1800, 3600, 21600, 43200, 86400, 2147483647};
+
+static int intervalValueToIndex(const uint32_t *values, size_t count, uint32_t value)
+{
+    for (size_t i = 0; i < count; i++) {
+        if (values[i] == value)
+            return (int)i;
+    }
+    return -1;
+}
+
+static void formatInterval(char *buf, size_t buflen, uint32_t secs)
+{
+    if (secs >= 3600 && secs % 3600 == 0)
+        lv_snprintf(buf, buflen, "%dh", secs / 3600);
+    else if (secs >= 60 && secs % 60 == 0)
+        lv_snprintf(buf, buflen, "%dm", secs / 60);
+    else
+        lv_snprintf(buf, buflen, "%ds", secs);
+}
+
+static void setPosBroadcastLabel(uint32_t secs)
+{
+    char val[16], buf[48];
+    if (secs == 2147483647)
+        lv_snprintf(val, sizeof(val), _("At Boot Only"));
+    else
+        formatInterval(val, sizeof(val), secs);
+    lv_snprintf(buf, sizeof(buf), _("Position Broadcast: %s"), val);
+    lv_label_set_text(objects.basic_settings_pos_broadcast_label, buf);
+}
+
+static void setGpsPollLabel(uint32_t secs)
+{
+    char val[16], buf[48];
+    if (secs == 2147483647)
+        lv_snprintf(val, sizeof(val), _("At Boot Only"));
+    else
+        formatInterval(val, sizeof(val), secs);
+    lv_snprintf(buf, sizeof(buf), _("GPS Polling: %s"), val);
+    lv_label_set_text(objects.basic_settings_gps_poll_label, buf);
+}
+
+void TFTView_320x240::ui_event_pos_broadcast_button(lv_event_t *e)
+{
+    lv_event_code_t event_code = lv_event_get_code(e);
+    if (event_code == LV_EVENT_CLICKED && THIS->activeSettings == eNone) {
+        int idx = intervalValueToIndex(posBroadcastValues, sizeof(posBroadcastValues) / sizeof(posBroadcastValues[0]),
+                                        THIS->db.config.position.position_broadcast_secs);
+        lv_dropdown_set_selected(objects.settings_pos_broadcast_dropdown, idx < 0 ? 0 : idx);
+        lv_obj_clear_flag(objects.settings_pos_broadcast_panel, LV_OBJ_FLAG_HIDDEN);
+        lv_group_focus_obj(objects.settings_pos_broadcast_dropdown);
+        THIS->disablePanel(objects.controller_panel);
+        THIS->disablePanel(objects.tab_page_basic_settings);
+        THIS->activeSettings = ePositionBroadcast;
+    }
+}
+
+void TFTView_320x240::ui_event_gps_poll_button(lv_event_t *e)
+{
+    lv_event_code_t event_code = lv_event_get_code(e);
+    if (event_code == LV_EVENT_CLICKED && THIS->activeSettings == eNone) {
+        int idx = intervalValueToIndex(gpsPollValues, sizeof(gpsPollValues) / sizeof(gpsPollValues[0]),
+                                        THIS->db.config.position.gps_update_interval);
+        lv_dropdown_set_selected(objects.settings_gps_poll_dropdown, idx < 0 ? 0 : idx);
+        lv_obj_clear_flag(objects.settings_gps_poll_panel, LV_OBJ_FLAG_HIDDEN);
+        lv_group_focus_obj(objects.settings_gps_poll_dropdown);
+        THIS->disablePanel(objects.controller_panel);
+        THIS->disablePanel(objects.tab_page_basic_settings);
+        THIS->activeSettings = eGpsPolling;
     }
 }
 
@@ -5499,6 +5581,30 @@ void TFTView_320x240::ui_event_ok(lv_event_t *e)
             lv_group_focus_obj(objects.basic_settings_language_button);
             break;
         }
+        case ePositionBroadcast: {
+            uint32_t value = posBroadcastValues[lv_dropdown_get_selected(objects.settings_pos_broadcast_dropdown)];
+            if (value != THIS->db.config.position.position_broadcast_secs) {
+                THIS->db.config.position.position_broadcast_secs = value;
+                THIS->controller->sendConfig(meshtastic_Config_PositionConfig{THIS->db.config.position});
+                THIS->notifyReboot(true);
+                setPosBroadcastLabel(value);
+            }
+            lv_obj_add_flag(objects.settings_pos_broadcast_panel, LV_OBJ_FLAG_HIDDEN);
+            lv_group_focus_obj(objects.basic_settings_pos_broadcast_button);
+            break;
+        }
+        case eGpsPolling: {
+            uint32_t value = gpsPollValues[lv_dropdown_get_selected(objects.settings_gps_poll_dropdown)];
+            if (value != THIS->db.config.position.gps_update_interval) {
+                THIS->db.config.position.gps_update_interval = value;
+                THIS->controller->sendConfig(meshtastic_Config_PositionConfig{THIS->db.config.position});
+                THIS->notifyReboot(true);
+                setGpsPollLabel(value);
+            }
+            lv_obj_add_flag(objects.settings_gps_poll_panel, LV_OBJ_FLAG_HIDDEN);
+            lv_group_focus_obj(objects.basic_settings_gps_poll_button);
+            break;
+        }
         case eScreenTimeout: {
 #if defined(SEEED_MESHPAGER_X2)
             // one step of the slider is 5 s
@@ -5788,6 +5894,16 @@ void TFTView_320x240::ui_event_cancel(lv_event_t *e)
         case TFTView_320x240::eLanguage: {
             lv_obj_add_flag(objects.settings_language_panel, LV_OBJ_FLAG_HIDDEN);
             lv_group_focus_obj(objects.basic_settings_language_button);
+            break;
+        }
+        case TFTView_320x240::ePositionBroadcast: {
+            lv_obj_add_flag(objects.settings_pos_broadcast_panel, LV_OBJ_FLAG_HIDDEN);
+            lv_group_focus_obj(objects.basic_settings_pos_broadcast_button);
+            break;
+        }
+        case TFTView_320x240::eGpsPolling: {
+            lv_obj_add_flag(objects.settings_gps_poll_panel, LV_OBJ_FLAG_HIDDEN);
+            lv_group_focus_obj(objects.basic_settings_gps_poll_button);
             break;
         }
         case TFTView_320x240::eScreenTimeout: {
@@ -7535,6 +7651,8 @@ void TFTView_320x240::updatePositionConfig(const meshtastic_Config_PositionConfi
         Themes::recolorText(objects.home_location_label, !cfg.fixed_position);
     }
     Themes::recolorButton(objects.home_location_button, cfg.gps_mode == meshtastic_Config_PositionConfig_GpsMode_ENABLED);
+    setPosBroadcastLabel(cfg.position_broadcast_secs);
+    setGpsPollLabel(cfg.gps_update_interval);
 }
 
 void TFTView_320x240::updatePowerConfig(const meshtastic_Config_PowerConfig &cfg)

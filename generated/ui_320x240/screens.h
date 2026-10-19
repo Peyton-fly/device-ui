@@ -571,6 +571,22 @@ typedef struct _objects_t {
     lv_obj_t *blank_screen_button;
     lv_obj_t *screen_lock_button_matrix;
     lv_obj_t *lock_screen_digits_label;
+    lv_obj_t *basic_settings_pos_broadcast_button;
+    lv_obj_t *basic_settings_pos_broadcast_label;
+    lv_obj_t *basic_settings_gps_poll_button;
+    lv_obj_t *basic_settings_gps_poll_label;
+    lv_obj_t *settings_pos_broadcast_panel;
+    lv_obj_t *settings_pos_broadcast_dropdown;
+    lv_obj_t *obj28;
+    lv_obj_t *obj28__ok_cancel_panel_w;
+    lv_obj_t *obj28__ok_button_w;
+    lv_obj_t *obj28__cancel_button_w;
+    lv_obj_t *settings_gps_poll_panel;
+    lv_obj_t *settings_gps_poll_dropdown;
+    lv_obj_t *obj29;
+    lv_obj_t *obj29__ok_cancel_panel_w;
+    lv_obj_t *obj29__ok_button_w;
+    lv_obj_t *obj29__cancel_button_w;
 } objects_t;
 
 extern objects_t objects;

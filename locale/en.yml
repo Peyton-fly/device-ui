@@ -25,6 +25,11 @@ en:
   'Input Control: none/none': ~
   'Message Alert Buzzer: on': ~
   'Language: English': ~
+  'Position Broadcast': ~
+  'GPS Polling': ~
+  'Position Broadcast: %s': ~
+  'GPS Polling: %s': ~
+  'At Boot Only': ~
   Configuration Reset: ~
   Backup & Restore: ~
   Reboot / Shutdown: ~

@@ -135,7 +135,9 @@ class TFTView_320x240 : public MeshtasticView
         eReset,
         eReboot,
         eDisplayMode,
-        eModifyChannel
+        eModifyChannel,
+        ePositionBroadcast,
+        eGpsPolling
     };
 
   protected:
@@ -391,6 +393,8 @@ class TFTView_320x240 : public MeshtasticView
     static void ui_event_alert_button(lv_event_t *e);
     static void ui_event_backup_button(lv_event_t *e);
     static void ui_event_reset_button(lv_event_t *e);
+    static void ui_event_pos_broadcast_button(lv_event_t *e);
+    static void ui_event_gps_poll_button(lv_event_t *e);
     static void ui_event_reboot_button(lv_event_t *e);
     static void ui_event_about_button(lv_event_t *e);
     static void ui_event_device_reboot_button(lv_event_t *e);

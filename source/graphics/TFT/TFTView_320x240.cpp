@@ -662,28 +662,6 @@ static void applyKeyFocusStyle(lv_obj_t *obj)
     lv_obj_add_style(obj, &style_key_focus, LV_PART_MAIN | LV_STATE_FOCUS_KEY);
 }
 
-/*
- * Yellow focus ring for the canned message picker rows: the picker's blue
- * panel base swallows the stock blue ring, so the selected phrase would be
- * indistinguishable from the rest.
- */
-static lv_style_t style_canned_row_focus;
-static bool style_canned_row_focus_ready = false;
-
-static void applyCannedRowFocusStyle(lv_obj_t *obj)
-{
-    if (!style_canned_row_focus_ready) {
-        lv_style_init(&style_canned_row_focus);
-        lv_style_set_border_width(&style_canned_row_focus, 3);
-        lv_style_set_border_color(&style_canned_row_focus, lv_color_hex(0xffc107));
-        lv_style_set_border_opa(&style_canned_row_focus, LV_OPA_COVER);
-        lv_style_set_border_side(&style_canned_row_focus, LV_BORDER_SIDE_FULL);
-        lv_style_set_outline_width(&style_canned_row_focus, 0);
-        style_canned_row_focus_ready = true;
-    }
-    lv_obj_add_style(obj, &style_canned_row_focus, LV_PART_MAIN | LV_STATE_FOCUS_KEY);
-}
-
 static void addKeyFocusStyles(void)
 {
     uint32_t group_count = lv_group_get_count();
@@ -1936,10 +1914,14 @@ void TFTView_320x240::showCannedMessagesPanel(void)
     GroupGuard group_guard(defaultPanelGroup);
 
     cannedPanel = lv_obj_create(objects.main_screen);
-    lv_obj_set_size(cannedPanel, LV_PCT(88), LV_PCT(60));
-    // the list pops up above the input line at the bottom of the chat
-    lv_obj_align_to(cannedPanel, objects.message_input_area, LV_ALIGN_OUT_TOP_MID, 0, -4);
-    add_style_settings_panel_style(cannedPanel);
+    // width spans the input line and the keyboard button, aligned with both
+    lv_area_t input_coords, key_coords;
+    lv_obj_get_coords(objects.message_input_area, &input_coords);
+    lv_obj_get_coords(objects.keyboard_button_0, &key_coords);
+    lv_obj_set_size(cannedPanel, key_coords.x2 - input_coords.x1 + 1, LV_PCT(60));
+    // the list pops up above the input row at the bottom of the chat
+    lv_obj_align_to(cannedPanel, objects.message_input_area, LV_ALIGN_OUT_TOP_LEFT, 0, -4);
+    add_style_panel_style(cannedPanel);
     lv_obj_set_flex_flow(cannedPanel, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(cannedPanel, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
     lv_obj_set_style_pad_row(cannedPanel, 6, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -1957,7 +1939,16 @@ void TFTView_320x240::showCannedMessagesPanel(void)
         lv_obj_set_width(row, lv_pct(100));
         lv_obj_set_height(row, LV_SIZE_CONTENT);
         lv_obj_add_flag(row, LV_OBJ_FLAG_EVENT_BUBBLE);
-        applyCannedRowFocusStyle(row);
+        lv_obj_add_flag(row, LV_OBJ_FLAG_SCROLL_ON_FOCUS);
+        applyKeyFocusStyle(row);
+        add_style_home_button_style(row);
+        lv_obj_set_style_border_color(row, colorMidGray, LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_style_border_width(row, 1, LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_style_radius(row, 6, LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_style_pad_left(row, 3, LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_style_pad_right(row, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_style_pad_top(row, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_style_pad_bottom(row, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
         lv_obj_t *label = lv_label_create(row);
         lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
         lv_label_set_text(label, token);
@@ -7398,6 +7389,10 @@ void TFTView_320x240::screenSaving(bool enabled)
         lv_obj_t *held = grp ? lv_group_get_focused(grp) : NULL;
         if (held)
             lv_obj_remove_state(held, LV_STATE_PRESSED);
+        // close the canned picker before blanking: waking returns to the chat
+        // panel, not to a stale picker that no longer holds the focus
+        if (cannedPanel)
+            hideCannedMessagesPanel();
         // switch the keyboard indev to mainButtons now; the SCREEN_LOAD_START handler will
         // add blank_screen_button to the group and focus it once the screen starts loading
         setInputGroup(groups.mainButtons);

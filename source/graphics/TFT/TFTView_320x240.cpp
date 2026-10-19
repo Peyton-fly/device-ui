@@ -1028,7 +1028,9 @@ void TFTView_320x240::apply_hotfix(void)
     applyKeyFocusStyle(objects.screen_lock_button_matrix);
     applyKeyFocusStyle(objects.bluetooth_button);
     applyKeyFocusStyle(objects.map_panel);
-    applyKeyFocusStyle(objects.chats_panel);
+    // chats_panel joins the group as the empty-list focus anchor, but must not
+    // draw the whole-panel ring: strip the style the loop above added for it
+    lv_obj_remove_style(objects.chats_panel, &style_key_focus, LV_PART_MAIN | LV_STATE_FOCUS_KEY);
 
     // The regenerated home_container carries FOCUSED-state styles that switch its
     // flex flow from ROW_WRAP to COLUMN (generated/ui_320x240/screens.c:416-419).
@@ -6020,7 +6022,6 @@ void TFTView_320x240::addMessage(lv_obj_t *container, uint32_t msgTime, uint32_t
     lv_obj_set_align(hiddenPanel, LV_ALIGN_CENTER);
 #if defined(SEEED_MESHPAGER_X2)
     lv_obj_add_flag(hiddenPanel, LV_OBJ_FLAG_EVENT_BUBBLE);
-    applyKeyFocusStyle(hiddenPanel);
 #endif
     lv_obj_clear_flag(hiddenPanel, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_radius(hiddenPanel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -6117,7 +6118,6 @@ void TFTView_320x240::addNode(uint32_t nodeNum, uint8_t ch, const char *userShor
     lv_obj_set_align(p, LV_ALIGN_CENTER);
 #if defined(SEEED_MESHPAGER_X2)
     lv_obj_add_flag(p, LV_OBJ_FLAG_EVENT_BUBBLE);
-    applyKeyFocusStyle(p);
 #endif
     lv_obj_set_style_pad_top(p, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_bottom(p, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -7982,7 +7982,6 @@ lv_obj_t *TFTView_320x240::newMessageContainer(uint32_t from, uint32_t to, uint8
     lv_obj_set_flex_align(container, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
 #if defined(SEEED_MESHPAGER_X2)
     lv_obj_add_flag(container, LV_OBJ_FLAG_EVENT_BUBBLE);
-    applyKeyFocusStyle(container);
     lv_obj_clear_flag(container, LV_OBJ_FLAG_SCROLL_WITH_ARROW); // arrows traverse; focus-follows scrolls (see clearArrowScroll)
 #endif
     lv_obj_clear_flag(container, lv_obj_flag_t(LV_OBJ_FLAG_PRESS_LOCK | LV_OBJ_FLAG_CLICK_FOCUSABLE | LV_OBJ_FLAG_GESTURE_BUBBLE |
@@ -8097,7 +8096,6 @@ void TFTView_320x240::newMessage(uint32_t nodeNum, lv_obj_t *container, uint8_t 
     lv_obj_set_align(hiddenPanel, LV_ALIGN_CENTER);
 #if defined(SEEED_MESHPAGER_X2)
     lv_obj_add_flag(hiddenPanel, LV_OBJ_FLAG_EVENT_BUBBLE);
-    applyKeyFocusStyle(hiddenPanel);
 #endif
     lv_obj_clear_flag(hiddenPanel, LV_OBJ_FLAG_SCROLLABLE); /// Flags
     lv_obj_set_style_radius(hiddenPanel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);

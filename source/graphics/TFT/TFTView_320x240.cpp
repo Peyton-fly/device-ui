@@ -1933,6 +1933,14 @@ void TFTView_320x240::showCannedMessagesPanel(void)
     lv_obj_set_flex_flow(cannedPanel, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(cannedPanel, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
     lv_obj_set_style_pad_row(cannedPanel, 6, LV_PART_MAIN | LV_STATE_DEFAULT);
+    // viewport must fit five whole rows (21px + 6px gap): local 5/5 pads give
+    // 144 - 10 = 134, so the sixth row starts fully below the fold
+    lv_obj_set_style_pad_top(cannedPanel, 5, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(cannedPanel, 5, LV_PART_MAIN | LV_STATE_DEFAULT);
+    // lv_obj's SCROLL_WITH_ARROW default makes the class KEY handler page
+    // this panel by height/4 on every UP/DOWN before our bubble handler
+    // runs - keypad paging is owned by ui_event_canned_panel_key
+    lv_obj_remove_flag(cannedPanel, LV_OBJ_FLAG_SCROLL_WITH_ARROW);
     lv_obj_add_event_cb(cannedPanel, ui_event_canned_panel_key, LV_EVENT_KEY, NULL);
     disablePanel(objects.messages_panel);
 
@@ -1947,7 +1955,10 @@ void TFTView_320x240::showCannedMessagesPanel(void)
         lv_obj_set_width(row, lv_pct(100));
         lv_obj_set_height(row, LV_SIZE_CONTENT);
         lv_obj_add_flag(row, LV_OBJ_FLAG_EVENT_BUBBLE);
-        lv_obj_add_flag(row, LV_OBJ_FLAG_SCROLL_ON_FOCUS);
+        // lv_button adds this flag in its class init; the panel key handler
+        // owns the paging scroll instead (ui_event_canned_panel_key)
+        lv_obj_remove_flag(row, LV_OBJ_FLAG_SCROLL_ON_FOCUS);
+        lv_obj_remove_flag(row, LV_OBJ_FLAG_SCROLL_WITH_ARROW);
         applyKeyFocusStyle(row);
         add_style_home_button_style(row);
         lv_obj_set_style_border_color(row, colorMidGray, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -1968,6 +1979,23 @@ void TFTView_320x240::showCannedMessagesPanel(void)
         lv_group_focus_obj(firstRow);
 }
 
+// X2: page the canned picker: scroll only when the newly focused row is
+// fully out of view (a partially visible row never scrolls), by exactly the
+// deficit so the row lands flush at the fold
+static void cannedRowScrollStep(lv_obj_t *row, lv_obj_t *panel)
+{
+    lv_obj_update_layout(panel);
+    lv_area_t p, r;
+    lv_obj_get_coords(panel, &p);
+    lv_obj_get_coords(row, &r);
+    int32_t view_top = p.y1 + lv_obj_get_style_space_top(panel, LV_PART_MAIN);
+    int32_t view_bottom = p.y2 - lv_obj_get_style_space_bottom(panel, LV_PART_MAIN);
+    if (r.y1 >= view_bottom)          // fully below the fold: reveal flush at the bottom
+        lv_obj_scroll_by(panel, 0, view_bottom - r.y2, LV_ANIM_ON);
+    else if (r.y2 <= view_top)        // fully above (incl. wrap-around): reveal flush at the top
+        lv_obj_scroll_by(panel, 0, view_top - r.y1, LV_ANIM_ON);
+}
+
 // X2: keypad control inside the canned message picker. All keys stay inside
 // the picker; ENTER is stopped too, the row's click fires from the release.
 void TFTView_320x240::ui_event_canned_panel_key(lv_event_t *e)
@@ -1975,6 +2003,9 @@ void TFTView_320x240::ui_event_canned_panel_key(lv_event_t *e)
     uint32_t key = lv_event_get_key(e);
     if (key == LV_KEY_UP || key == LV_KEY_DOWN) {
         navigateScope(lv_event_get_target_obj(e), key == LV_KEY_DOWN, THIS->cannedPanel);
+        lv_obj_t *row = lv_group_get_focused(lv_group_get_default());
+        if (row)
+            cannedRowScrollStep(row, THIS->cannedPanel);
         lv_event_stop_processing(e);
     } else if (key == LV_KEY_ESC || key == LV_KEY_LEFT) {
         THIS->hideCannedMessagesPanel();

@@ -1028,6 +1028,12 @@ void TFTView_320x240::apply_hotfix(void)
     applyKeyFocusStyle(objects.screen_lock_button_matrix);
     applyKeyFocusStyle(objects.bluetooth_button);
     applyKeyFocusStyle(objects.map_panel);
+    // node rows ring the row card (node_panel / addNode's p, lit via FOCUS_KEY
+    // bubbling), not the inset node button: strip the loop-added button ring
+    applyKeyFocusStyle(objects.node_panel);
+    lv_obj_remove_style(objects.node_button, &style_key_focus, LV_PART_MAIN | LV_STATE_FOCUS_KEY);
+    // same theme-outline suppression as the dynamic rows in addNode()
+    lv_obj_set_style_outline_width(objects.node_button, 0, LV_PART_MAIN | LV_STATE_FOCUS_KEY);
     // chats_panel joins the group as the empty-list focus anchor, but must not
     // draw the whole-panel ring: strip the style the loop above added for it
     lv_obj_remove_style(objects.chats_panel, &style_key_focus, LV_PART_MAIN | LV_STATE_FOCUS_KEY);
@@ -6265,6 +6271,7 @@ void TFTView_320x240::addNode(uint32_t nodeNum, uint8_t ch, const char *userShor
     lv_obj_set_align(p, LV_ALIGN_CENTER);
 #if defined(SEEED_MESHPAGER_X2)
     lv_obj_add_flag(p, LV_OBJ_FLAG_EVENT_BUBBLE);
+    applyKeyFocusStyle(p);
 #endif
     lv_obj_set_style_pad_top(p, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_bottom(p, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -6301,7 +6308,9 @@ void TFTView_320x240::addNode(uint32_t nodeNum, uint8_t ch, const char *userShor
     lv_obj_add_flag(nodeButton, LV_OBJ_FLAG_SCROLL_ON_FOCUS);
 #if defined(SEEED_MESHPAGER_X2)
     lv_obj_add_flag(nodeButton, LV_OBJ_FLAG_EVENT_BUBBLE);
-    applyKeyFocusStyle(nodeButton);
+    // the theme draws a FOCUS_KEY outline on every lv_button; the row card (p)
+    // owns the ring, so zero the button outline to avoid a second inner ring
+    lv_obj_set_style_outline_width(nodeButton, 0, LV_PART_MAIN | LV_STATE_FOCUS_KEY);
 #endif
     lv_obj_set_style_shadow_width(nodeButton, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_max_height(nodeButton, 132, LV_PART_MAIN | LV_STATE_DEFAULT);

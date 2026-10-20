@@ -886,6 +886,7 @@ static void clearArrowScroll(lv_obj_t *parent)
 
 static void ui_event_checkable_arrow(lv_event_t *e); // defined with the other X2 key handlers
 static void ui_event_editable_ramp(lv_event_t *e);   // ditto
+static void ui_event_qr_modal_key(lv_event_t *e);    // ditto
 
 // tree walk: attach the X2 arrow handlers to every CHECKABLE widget and to
 // the dropdowns/sliders - the lv_obj base class would otherwise toggle
@@ -1398,6 +1399,7 @@ void TFTView_320x240::ui_events_init(void)
     // generate PSK
     lv_obj_add_event_cb(objects.settings_modify_channel_key_generate_button, ui_event_generate_psk, LV_EVENT_CLICKED, NULL);
     lv_obj_add_event_cb(objects.settings_modify_channel_qr_button, ui_event_qr_code, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(objects.settings_modify_channel_qr_button, ui_event_qr_modal_key, KEY_PREPROCESS, NULL);
 
     // screen
     lv_obj_add_event_cb(objects.calibration_screen, ui_event_calibration_screen_loaded, LV_EVENT_SCREEN_LOADED, (void *)7);
@@ -1750,6 +1752,15 @@ void TFTView_320x240::exitPanelToNavBar(void)
 // switching instead. LEFT/RIGHT outside tab pages fall through: the base
 // class keeps its native directional toggle (RIGHT checks, LEFT unchecks).
 // ---------------------------------------------------------------------------
+// X2 d-pad: the channel QR preview is modal - traversal keys stay on the QR
+// (OK/RETURN close it), they must not roam under the overlay
+static void ui_event_qr_modal_key(lv_event_t *e)
+{
+    uint32_t key = lv_event_get_key(e);
+    if (key == LV_KEY_UP || key == LV_KEY_DOWN || key == LV_KEY_LEFT || key == LV_KEY_RIGHT)
+        lv_event_stop_processing(e);
+}
+
 static void ui_event_checkable_arrow(lv_event_t *e)
 {
     uint32_t key = lv_event_get_key(e);
@@ -3613,6 +3624,9 @@ void TFTView_320x240::ui_event_modify_channel(lv_event_t *e)
             }
         }
 
+        // entry hygiene: never open the dialog on a stale QR preview
+        if (!lv_obj_has_flag(objects.settings_modify_channel_qr_panel, LV_OBJ_FLAG_HIDDEN))
+            lv_obj_send_event(objects.settings_modify_channel_qr_button, LV_EVENT_CLICKED, nullptr);
         THIS->disablePanel(objects.settings_channel_panel);
         lv_obj_clear_flag(objects.settings_modify_channel_panel, LV_OBJ_FLAG_HIDDEN);
         lv_group_focus_obj(objects.settings_modify_channel_name_textarea);
@@ -3661,19 +3675,30 @@ void TFTView_320x240::ui_event_generate_psk(lv_event_t *e)
             c = '\0'; // remove paddings at the end of the url
     }
     std::string qr = "https://meshtastic.org/e/#" + base64Https;
+    if (THIS->qr) { // repeated clicks must not stack QR canvases
+        lv_obj_delete(THIS->qr);
+        THIS->qr = nullptr;
+    }
     lv_obj_remove_flag(objects.settings_modify_channel_qr_panel, LV_OBJ_FLAG_HIDDEN);
     THIS->qr = THIS->showQrCode(objects.settings_modify_channel_qr_panel, qr.c_str());
     lv_obj_add_state(objects.keyboard_button_3, LV_STATE_DISABLED);
     lv_obj_add_state(objects.keyboard_button_4, LV_STATE_DISABLED);
+    lv_group_focus_obj(objects.settings_modify_channel_qr_button);
 }
 
 void TFTView_320x240::ui_event_qr_code(lv_event_t *e)
 {
+    if (lv_obj_has_flag(objects.settings_modify_channel_qr_panel, LV_OBJ_FLAG_HIDDEN))
+        return; // nothing to close (double activation guard)
+    lv_obj_remove_state(lv_event_get_target_obj(e), LV_STATE_PRESSED); // focus moves mid-press
     lv_obj_remove_state(objects.keyboard_button_3, LV_STATE_DISABLED);
     lv_obj_remove_state(objects.keyboard_button_4, LV_STATE_DISABLED);
     lv_obj_add_flag(objects.settings_modify_channel_qr_panel, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_delete(THIS->qr);
-    THIS->qr = nullptr;
+    if (THIS->qr) {
+        lv_obj_delete(THIS->qr);
+        THIS->qr = nullptr;
+    }
+    lv_group_focus_obj(objects.settings_modify_channel_key_generate_button);
 }
 
 void TFTView_320x240::ui_event_delete_channel(lv_event_t *e)
@@ -5821,6 +5846,11 @@ void TFTView_320x240::ui_event_ok(lv_event_t *e)
             break;
         }
         case eModifyChannel: {
+            if (!lv_obj_has_flag(objects.settings_modify_channel_qr_panel, LV_OBJ_FLAG_HIDDEN)) {
+                // OK first dismisses the QR preview; focus returns to the key button
+                lv_obj_send_event(objects.settings_modify_channel_qr_button, LV_EVENT_CLICKED, nullptr);
+                return;
+            }
             meshtastic_ChannelSettings_psk_t psk = {};
             const char *name = lv_textarea_get_text(objects.settings_modify_channel_name_textarea);
             const char *base64 = lv_textarea_get_text(objects.settings_modify_channel_psk_textarea);
@@ -6002,6 +6032,11 @@ void TFTView_320x240::ui_event_cancel(lv_event_t *e)
 #endif
         }
         case TFTView_320x240::eModifyChannel: {
+            if (!lv_obj_has_flag(objects.settings_modify_channel_qr_panel, LV_OBJ_FLAG_HIDDEN)) {
+                // RETURN/Cancel first dismisses the QR preview; focus returns to the key button
+                lv_obj_send_event(objects.settings_modify_channel_qr_button, LV_EVENT_CLICKED, nullptr);
+                return;
+            }
             lv_obj_add_flag(objects.settings_modify_channel_panel, LV_OBJ_FLAG_HIDDEN);
             lv_group_focus_obj(objects.settings_channel0_button);
             THIS->enablePanel(objects.settings_channel_panel);
@@ -7549,6 +7584,10 @@ void TFTView_320x240::screenSaving(bool enabled)
         // panel, not to a stale picker that no longer holds the focus
         if (cannedPanel)
             hideCannedMessagesPanel();
+        // close a channel QR preview before blanking: waking returns to the
+        // edit dialog, never to a stale overlay
+        if (!lv_obj_has_flag(objects.settings_modify_channel_qr_panel, LV_OBJ_FLAG_HIDDEN))
+            lv_obj_send_event(objects.settings_modify_channel_qr_button, LV_EVENT_CLICKED, nullptr);
         // switch the keyboard indev to mainButtons now; the SCREEN_LOAD_START handler will
         // add blank_screen_button to the group and focus it once the screen starts loading
         setInputGroup(groups.mainButtons);
@@ -7565,10 +7604,25 @@ void TFTView_320x240::screenSaving(bool enabled)
         } else if (objects.main_screen) {
             ILOG_DEBUG("showing main screen");
             lv_screen_load_anim(objects.main_screen, LV_SCR_LOAD_ANIM_NONE, 0, 0, false);
+#if defined(SEEED_MESHPAGER_X2)
+            // waking returns to the panel state from before blanking: overlays were
+            // closed on the way down, so rebind the keypad to the panel group and
+            // keep its remembered focus. Upstream's cancel-a-level pop leaves the
+            // keypad on the nav-bar group while the dialog list stays on screen
+            if (THIS->activeSettings != eNone) {
+                THIS->setInputGroup(THIS->defaultPanelGroup);
+                lv_obj_t *focus = THIS->defaultPanelGroup ? lv_group_get_focused(THIS->defaultPanelGroup) : NULL;
+                if (focus == NULL || ancestorHidden(focus)) {
+                    lv_event_t e = {.code = LV_EVENT_CLICKED};
+                    ui_event_cancel(&e); // degraded fallback: pop one level
+                }
+            }
+#else
             if (THIS->activeSettings != eNone) {
                 lv_event_t e = {.code = LV_EVENT_CLICKED};
                 ui_event_cancel(&e);
             }
+#endif
             screenLocked = false;
         } else {
             ILOG_DEBUG("showing boot screen");

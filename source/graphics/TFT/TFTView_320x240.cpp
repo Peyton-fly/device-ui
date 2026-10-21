@@ -540,6 +540,37 @@ void TFTView_320x240::ui_select_main_panel(lv_obj_t *b, lv_obj_t *p, lv_obj_t *t
 #endif
 }
 
+#if defined(SEEED_MESHPAGER_X2)
+// settings drill-down state (about / tools pages): the sub-panel now on
+// screen and where RETURN climbs back to. ui_set_active records these when
+// the settings button activates one of the tool sub-pages; the screen key
+// handler consumes them under an activePanel guard, so stale entries can
+// never fire. subReturnFocus is only stored for the static settings rows
+// (controller_panel origin) - dynamic rows like the nodes list can be
+// deleted while the sub-panel is open.
+static lv_obj_t *subPanelEntered = NULL;
+static lv_obj_t *subReturnPanel = NULL;
+static lv_obj_t *subReturnButton = NULL;
+static lv_obj_t *subReturnTop = NULL;
+static lv_obj_t *subReturnFocus = NULL;
+
+// scroll-only sub pages (settings about text, tools packet log): no focusable
+// children, so the page itself is registered as the group's focus anchor in
+// apply_hotfix and UP/DOWN scroll its content (ui_event_scroll_page_key)
+static lv_obj_t *scrollPages[2] = {NULL, NULL};
+
+static bool focusScrollPage(lv_obj_t *page)
+{
+    for (lv_obj_t *candidate : scrollPages) {
+        if (candidate == page) {
+            lv_group_focus_obj(page);
+            return true;
+        }
+    }
+    return false;
+}
+#endif
+
 /**
  * @brief set active button, panel and top panel, and move keypad focus into the panel
  *
@@ -549,6 +580,22 @@ void TFTView_320x240::ui_select_main_panel(lv_obj_t *b, lv_obj_t *p, lv_obj_t *t
  */
 void TFTView_320x240::ui_set_active(lv_obj_t *b, lv_obj_t *p, lv_obj_t *tp)
 {
+#if defined(SEEED_MESHPAGER_X2)
+    // entering a settings drill-down page (about/tools): remember where
+    // RETURN climbs back to. Fresh entries only - re-entering the page the
+    // choose-node flows use keeps the original origin. The advanced settings
+    // panel is a nav-bar-level mode toggle, not a drill-down.
+    if (b == objects.settings_button && p != objects.controller_panel && p != ui_AdvancedSettingsPanel &&
+        activePanel != p) {
+        subPanelEntered = p;
+        subReturnButton = activeButton;
+        subReturnPanel = activePanel;
+        subReturnTop = activeTopPanel;
+        subReturnFocus = (activePanel == objects.controller_panel && defaultPanelGroup)
+                             ? lv_group_get_focused(defaultPanelGroup)
+                             : NULL;
+    }
+#endif
     ui_select_main_panel(b, p, tp);
 #if defined(SEEED_MESHPAGER_X2)
     setInputGroup(defaultPanelGroup);
@@ -563,10 +610,13 @@ void TFTView_320x240::ui_set_active(lv_obj_t *b, lv_obj_t *p, lv_obj_t *tp)
     lv_obj_add_flag(objects.msg_popup_panel, LV_OBJ_FLAG_HIDDEN);
 #if defined(SEEED_MESHPAGER_X2)
     // keypad focus resting on a hidden object would silently swallow all keys;
-    // land it on the first focusable widget of the active panel, or fall back
-    // to the nav bar when the panel has none
-    if (defaultPanelGroup && ancestorHidden(lv_group_get_focused(defaultPanelGroup)) && !focusFirstInScope(activePanel))
-        exitPanelToNavBar();
+    // land it on the first focusable widget of the active panel, on the page
+    // itself for the scroll-only pages, or fall back to the nav bar
+    if (defaultPanelGroup && ancestorHidden(lv_group_get_focused(defaultPanelGroup)) &&
+        !focusFirstInScope(activePanel)) {
+        if (!focusScrollPage(activePanel))
+            exitPanelToNavBar();
+    }
 #endif
 }
 
@@ -891,6 +941,7 @@ static void clearArrowScroll(lv_obj_t *parent)
 static void ui_event_checkable_arrow(lv_event_t *e); // defined with the other X2 key handlers
 static void ui_event_editable_ramp(lv_event_t *e);   // ditto
 static void ui_event_qr_modal_key(lv_event_t *e);    // ditto
+static void ui_event_scroll_page_key(lv_event_t *e); // ditto
 
 // tree walk: attach the X2 arrow handlers to every CHECKABLE widget and to
 // the dropdowns/sliders - the lv_obj base class would otherwise toggle
@@ -933,6 +984,16 @@ void TFTView_320x240::apply_hotfix(void)
         // empty-list focus anchor: with no chat rows, entering the chats
         // panel still leaves keypad focus on the panel itself
         lv_group_add_obj(group, objects.chats_panel);
+        // scroll-only sub pages: the page itself is the focus anchor so the
+        // d-pad can scroll it (ui_event_scroll_page_key)
+        scrollPages[0] = objects.settings_about_panel;
+        scrollPages[1] = objects.tools_packet_log_panel;
+        for (lv_obj_t *page : scrollPages)
+            lv_group_add_obj(group, page);
+        // CHECKABLE would arm the checkable arrow guard on the about page,
+        // eating the UP/DOWN scroll keys before ui_event_scroll_page_key runs
+        // (addArrowKeyGuards below walks flags, so strip first)
+        lv_obj_remove_flag(objects.settings_about_panel, LV_OBJ_FLAG_CHECKABLE);
     }
 
     // for keyboard control: main menu buttons are moved into own group
@@ -1007,6 +1068,10 @@ void TFTView_320x240::apply_hotfix(void)
 
     // map two-mode keypad control (browse / controls)
     lv_obj_add_event_cb(objects.map_panel, ui_event_map_key, LV_EVENT_KEY, NULL);
+    // scroll-only sub pages: UP/DOWN scroll the page; every other key bubbles
+    // on to ui_event_ScreenKey (RETURN/LEFT climb back to the settings list)
+    for (lv_obj_t *page : scrollPages)
+        lv_obj_add_event_cb(page, ui_event_scroll_page_key, LV_EVENT_KEY, NULL);
 
     // the hidden boot logo arc auto-joins the default group and would be an
     // invisible focus stop
@@ -1550,6 +1615,16 @@ void TFTView_320x240::ui_event_ScreenKey(lv_event_t *e)
             } else if (target && THIS->activeSettings == eReboot) {
                 navigateScope(target, c == LV_KEY_RIGHT);
                 lv_event_stop_processing(e);
+            } else if (c == LV_KEY_LEFT && target && THIS->activeSettings == eNone && subReturnPanel &&
+                       THIS->activePanel == subPanelEntered && !objConsumesArrows(target) &&
+                       !lv_obj_has_flag(target, LV_OBJ_FLAG_CHECKABLE)) {
+                // LEFT in a settings drill-down page climbs back to the list
+                // it came from (same level as RETURN): re-enter this handler
+                // with an ESC to run the shared restore path. Widgets that
+                // use LEFT natively (statistics table cells) keep it.
+                uint32_t back = LV_KEY_ESC;
+                lv_event_stop_processing(e);
+                lv_obj_send_event(objects.main_screen, LV_EVENT_KEY, &back);
             } else if (c == LV_KEY_LEFT && target && THIS->activeSettings == eNone &&
                        lv_obj_get_screen(target) == objects.main_screen &&
                        !isAncestor(objects.button_panel, target) &&
@@ -1570,7 +1645,8 @@ void TFTView_320x240::ui_event_ScreenKey(lv_event_t *e)
         }
 
         // RETURN climbs down one level: an open conversation goes back to
-        // the chat list; any other panel keeps its view, focus goes to the
+        // the chat list; a settings drill-down page goes back to the list it
+        // was entered from; any other panel keeps its view, focus goes to the
         // nav bar
         if (c == LV_KEY_ESC) {
             // Clean up any overlays (keyboard, QR code, popups, settings dialogs) before returning to menu
@@ -1580,6 +1656,17 @@ void TFTView_320x240::ui_event_ScreenKey(lv_event_t *e)
                 // after ui_set_active's own tail focus
                 THIS->ui_set_active(objects.messages_button, objects.chats_panel, objects.top_chats_panel);
                 focusFirstInScope(objects.chats_panel);
+            } else if (subReturnPanel && THIS->activePanel == subPanelEntered) {
+                // settings drill-down (about/tools): restore the panel the
+                // page was entered from, ring back on the entry row; origins
+                // with dynamic rows (nodes list) land on the list's own
+                // first focusable instead of a remembered row
+                THIS->ui_set_active(subReturnButton, subReturnPanel, subReturnTop);
+                if (subReturnFocus && !ancestorHidden(subReturnFocus))
+                    lv_group_focus_obj(subReturnFocus);
+                else
+                    THIS->setGroupFocus(subReturnPanel);
+                subPanelEntered = subReturnPanel = subReturnButton = subReturnTop = subReturnFocus = NULL;
             } else {
                 THIS->exitPanelToNavBar();
             }
@@ -1770,6 +1857,26 @@ static void ui_event_qr_modal_key(lv_event_t *e)
     uint32_t key = lv_event_get_key(e);
     if (key == LV_KEY_UP || key == LV_KEY_DOWN || key == LV_KEY_LEFT || key == LV_KEY_RIGHT)
         lv_event_stop_processing(e);
+}
+
+// X2 d-pad: scroll-only pages (settings about, tools packet log) hold the
+// keypad focus themselves; UP/DOWN scroll by half a page in the direction of
+// the base class SCROLL_WITH_ARROW mapping (DOWN increases the scroll
+// position). All other keys bubble on to ui_event_ScreenKey, so RETURN/LEFT
+// still climb back to the settings list.
+static void ui_event_scroll_page_key(lv_event_t *e)
+{
+    if (lv_event_get_code(e) != LV_EVENT_KEY)
+        return;
+    uint32_t key = lv_event_get_key(e);
+    if (key == LV_KEY_UP || key == LV_KEY_DOWN) {
+        lv_obj_t *page = lv_event_get_target_obj(e);
+        int32_t dy = lv_obj_get_height(page) / 2;
+        if (key == LV_KEY_UP)
+            dy = -dy;
+        lv_obj_scroll_to_y(page, lv_obj_get_scroll_y(page) + dy, LV_ANIM_ON);
+        lv_event_stop_processing(e);
+    }
 }
 
 static void ui_event_checkable_arrow(lv_event_t *e)

@@ -87,7 +87,7 @@ ja:
   Highlight: 強調表示
   Active Chat: アクティブチャット
   Telemetry: テレメトリ
-  IAQ: 空気質
+  IAQ: 室内空気質
   Start: 開始
   "choose\nnode": "ノードを\n選択"
   choose target node: 対象ノードを選択
@@ -131,7 +131,7 @@ ja:
   'Modem Preset: %s': 'モデムプリセット：%s'
   'WiFi: %s': 'WiFi：%s'
   <not set>: <未設定>
-  Util %0.1f%%  Air %0.1f%%: 使用率 %0.1f%%  帯域 %0.1f%%
+  Util %0.1f%%  Air %0.1f%%: 使用率 %0.1f%%  空中時間 %0.1f%%
   'hops: %d': 'ホップ：%d'
   unknown: 不明
   Connected!: 接続しました！
@@ -172,12 +172,12 @@ ja:
   'Position Broadcast: %s': '位置ブロードキャスト：%s'
   'GPS Polling: %s': 'GPS ポーリング：%s'
   'At Boot Only': 起動時のみ
-  'About / Legal': 情報 / 法的通知
-  'About & Attribution': 情報とクレジット
+  'About / Legal': 情報 / 法的表記
+  'About & Attribution': 情報とクレジット表記
   'Google Maps': Google マップ
   '<unsupported>': '<未対応>'
   "LONG FAST\nLONG MODERATE\nLONG TURBO\nMEDIUM FAST\nMEDIUM SLOW\nMEDIUM TURBO\nSHORT FAST\nSHORT SLOW\nSHORT TURBO\nLITE FAST\nLITE SLOW\nNARROW FAST\nNARROW SLOW\nTINY FAST\nTINY SLOW": "遠距離高速\n遠距離中速\n遠距離ターボ\n中距離高速\n中距離低速\n中距離ターボ\n近距離高速\n近距離低速\n近距離ターボ\nライト高速\nライト低速\nナロー高速\nナロー低速\nタイニー高速\nタイニー低速"
-  "Firmware: meshtastic®\nVersion: %s\nLicense: GNU GPLv3\n\nSource code available at:\ngithub.com/meshtastic": "ファームウェア：meshtastic®\nバージョン：%s\nライセンス：GNU GPLv3\n\nソースコード：\ngithub.com/meshtastic"
+  "Firmware: meshtastic®\nVersion: %s\nLicense: GNU GPLv3\n\nSource code available at:\ngithub.com/meshtastic": "ファームウェア：meshtastic®\nバージョン：%s\nライセンス：GNU GPLv3\n\nソースコードは以下のURLから入手可能：\ngithub.com/meshtastic"
   "[UI Framework]\nLVGL Graphics (MIT)\nCopyright (c) 2025\nLVGL Kft.\nlvgl.io": "[UI フレームワーク]\nLVGL Graphics (MIT)\nCopyright (c) 2025\nLVGL Kft.\nlvgl.io"
   "[UI Icons]\nDazzle Line Icons\nCC BY 4.0 by Dazzle UI\nvia svgrepo.com": "[UI アイコン]\nDazzle Line Icons\nCC BY 4.0 by Dazzle UI\nvia svgrepo.com"
   "[Map Data]\n© OpenStreetMap contributors\nData available under the\nOpen Database License\nopenstreetmap.org/copyright\n": "[地図データ]\n© OpenStreetMap contributors\nデータは Open Database License の下で提供\nopenstreetmap.org/copyright\n"

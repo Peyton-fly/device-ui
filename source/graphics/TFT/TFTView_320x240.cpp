@@ -1188,7 +1188,7 @@ void TFTView_320x240::apply_hotfix(void)
         lv_label_set_text(obj, label);
     };
 
-    char fw[128];
+    char fw[256];
     snprintf(fw, sizeof(fw), _(ABOUT_FIRMWARE_TEXT), firmware_version);
     createLabel(objects.settings_about_panel, fw);
     createLabel(objects.settings_about_panel, _(ABOUT_FRAMEWORK_TEXT));

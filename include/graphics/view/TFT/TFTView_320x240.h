@@ -440,6 +440,7 @@ class TFTView_320x240 : public MeshtasticView
     // keys travel (the CHECKABLE arrow guard there is a file-static handler).
     static void ui_event_chat_input_key(lv_event_t *e);
     static void ui_event_keyboard_key(lv_event_t *e);
+    static void ui_event_keyboard_action(lv_event_t *e);
     static void ui_event_map_key(lv_event_t *e);
     // X2 key handlers for the chat keyboard toggle and the chat message area.
     static void ui_event_keyboard_button_key(lv_event_t *e);

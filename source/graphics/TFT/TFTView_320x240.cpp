@@ -123,6 +123,10 @@ time_t TFTView_320x240::startTime = 0;
 uint32_t TFTView_320x240::pinKeys = 0;
 bool TFTView_320x240::screenLocked = false;
 bool TFTView_320x240::screenUnlockRequest = false;
+#if defined(SEEED_MESHPAGER_X2)
+// one verified PIN exempts the settings gate until the screen locks again
+static bool settingsGateUnlocked = false;
+#endif
 TFTView_320x240::KbdSlide TFTView_320x240::kbdSlideState = TFTView_320x240::eKbdHidden;
 int32_t TFTView_320x240::kbdPanelBaseY = INT32_MIN;
 
@@ -994,6 +998,12 @@ void TFTView_320x240::apply_hotfix(void)
     lv_obj_add_event_cb(objects.message_input_area, ui_event_canned_open, LV_EVENT_SHORT_CLICKED, NULL);
     lv_obj_add_event_cb(objects.keyboard_button_0, ui_event_keyboard_button_key, KEY_PREPROCESS, NULL);
     lv_obj_add_event_cb(objects.keyboard, ui_event_keyboard_key, KEY_PREPROCESS, NULL);
+    // the keyboard's action buttons (NUMBER pad OK / keyboard icon, QWERTY
+    // close / ok) surface as READY / CANCEL events on the keyboard itself;
+    // X2 has no other consumer, so both fold the keyboard and return focus
+    // to the opener button
+    lv_obj_add_event_cb(objects.keyboard, ui_event_keyboard_action, LV_EVENT_READY, NULL);
+    lv_obj_add_event_cb(objects.keyboard, ui_event_keyboard_action, LV_EVENT_CANCEL, NULL);
 
     // map two-mode keypad control (browse / controls)
     lv_obj_add_event_cb(objects.map_panel, ui_event_map_key, LV_EVENT_KEY, NULL);
@@ -1725,8 +1735,9 @@ void TFTView_320x240::applyMainButtonPreview(void)
         ui_select_main_panel(objects.map_button, objects.map_panel, objects.top_map_panel);
     } else if (cur == objects.settings_button) {
         // locked settings have nothing to preview; entering still routes
-        // through the lock screen in the button's CLICKED handler
-        if (!db.uiConfig.settings_lock)
+        // through the lock screen in the button's CLICKED handler (unless
+        // this lock cycle already verified a PIN)
+        if (!db.uiConfig.settings_lock || settingsGateUnlocked)
             ui_select_main_panel(objects.settings_button, objects.controller_panel, objects.top_settings_panel);
     }
 }
@@ -1840,6 +1851,11 @@ bool TFTView_320x240::focusLastMessageBubble(void)
 // the keyboard, so the d-pad can walk on from there.
 void TFTView_320x240::closeKeyboardFocusInput(void)
 {
+#if defined(SEEED_MESHPAGER_X2)
+    // a numeric keyboard (PIN entry) may have been open: back to the default
+    // map for the next chat or settings textarea
+    lv_keyboard_set_mode(objects.keyboard, LV_KEYBOARD_MODE_TEXT_LOWER);
+#endif
     // instant close even mid-slide: hides the keyboard and restores positions
     THIS->resetKeyboardSlide();
     lv_obj_t *ta = lv_keyboard_get_textarea(objects.keyboard);
@@ -2061,6 +2077,15 @@ void TFTView_320x240::ui_event_keyboard_key(lv_event_t *e)
         closeKeyboardFocusInput();
         lv_event_stop_processing(e);
     }
+}
+
+// X2: the keyboard's action buttons arrive as READY / CANCEL events sent by
+// the default keyboard callback; fold the keyboard and hand focus back to
+// the opener (same landing as ESC).
+void TFTView_320x240::ui_event_keyboard_action(lv_event_t *e)
+{
+    lv_event_stop_processing(e);
+    closeKeyboardFocusInput();
 }
 
 // X2: the right end of the chat input pair - LEFT goes back to the input
@@ -2451,7 +2476,13 @@ void TFTView_320x240::ui_event_SettingsButton(lv_event_t *e)
             ignoreClicked = false;
             return;
         }
-        if (THIS->db.uiConfig.settings_lock) {
+#if defined(SEEED_MESHPAGER_X2)
+        // one PIN per lock cycle: the gate stays exempt until the screen locks again
+        bool gateLocked = THIS->db.uiConfig.settings_lock && !settingsGateUnlocked;
+#else
+        bool gateLocked = THIS->db.uiConfig.settings_lock;
+#endif
+        if (gateLocked) {
             lv_obj_add_flag(objects.tab_page_basic_settings, LV_OBJ_FLAG_HIDDEN);
             THIS->ui_set_active(objects.settings_button, objects.controller_panel, objects.top_settings_panel);
             lv_screen_load_anim(objects.lock_screen, LV_SCR_LOAD_ANIM_NONE, 0, 0, false);
@@ -2468,6 +2499,8 @@ void TFTView_320x240::ui_event_SettingsButton(lv_event_t *e)
         lv_obj_remove_state(lv_event_get_target_obj(e), LV_STATE_PRESSED);
         screenLocked = true;
         screenUnlockRequest = false;
+        // manual lock re-arms the settings gate
+        settingsGateUnlocked = false;
 #else
         screenLocked = true;
         screenUnlockRequest = false;
@@ -2967,9 +3000,26 @@ void TFTView_320x240::ui_event_KeyboardButton(lv_event_t *e)
             lv_group_focus_obj(objects.nodes_hl_name_area);
             break;
         case 7:
+#if defined(SEEED_MESHPAGER_X2)
+            // X2: explicit open/close keyed on visibility - kbdSlideState only
+            // tracks the chat slide animation and stays eKbdHidden in settings.
+            // Closing runs through closeKeyboardFocusInput so focus returns here.
+            if (!lv_obj_has_flag(objects.keyboard, LV_OBJ_FLAG_HIDDEN)) {
+                closeKeyboardFocusInput();
+                return;
+            }
+            lv_obj_remove_flag(objects.keyboard, LV_OBJ_FLAG_HIDDEN);
+            THIS->showKeyboard(objects.settings_screen_lock_password_textarea);
+            // the PIN only accepts digits: skip the QWERTY walking distance
+            lv_keyboard_set_mode(objects.keyboard, LV_KEYBOARD_MODE_NUMBER);
+            // the arrows must reach the keyboard's buttonmatrix to type
+            lv_group_focus_obj(objects.keyboard);
+            return; // the shared HIDDEN toggle below is not wanted here
+#else
             THIS->showKeyboard(objects.settings_screen_lock_password_textarea);
             lv_group_focus_obj(objects.settings_screen_lock_password_textarea);
             break;
+#endif
         case 8:
             THIS->showKeyboard(objects.settings_wifi_ssid_textarea);
             lv_group_focus_obj(objects.settings_wifi_ssid_textarea);
@@ -3017,6 +3067,12 @@ void TFTView_320x240::ui_event_Keyboard(lv_event_t *e)
             break;
         }
         case 35: { // keyboard
+#if defined(SEEED_MESHPAGER_X2)
+            // the action buttons fold the keyboard at VALUE_CHANGED time; the
+            // CLICKED that follows must not toggle popovers on a hidden one
+            if (lv_obj_has_flag(objects.keyboard, LV_OBJ_FLAG_HIDDEN))
+                break;
+#endif
             lv_keyboard_set_popovers(objects.keyboard, !lv_keyboard_get_popovers(kb));
             break;
         }
@@ -3361,9 +3417,15 @@ void TFTView_320x240::ui_event_screen_lock_button(lv_event_t *e)
 {
     lv_event_code_t event_code = lv_event_get_code(e);
     if (event_code == LV_EVENT_CLICKED && THIS->activeSettings == eNone) {
+#if defined(SEEED_MESHPAGER_X2)
+        // start empty: a prefilled pin already sits at the textarea's
+        // max_length and every typed digit would be dropped
+        lv_textarea_set_text(objects.settings_screen_lock_password_textarea, "");
+#else
         char buf[10];
         lv_snprintf(buf, 7, "%06d", THIS->db.uiConfig.pin_code);
         lv_textarea_set_text(objects.settings_screen_lock_password_textarea, buf);
+#endif
         if (THIS->db.uiConfig.screen_lock) {
             lv_obj_add_state(objects.settings_screen_lock_switch, LV_STATE_CHECKED);
         } else {
@@ -3376,7 +3438,20 @@ void TFTView_320x240::ui_event_screen_lock_button(lv_event_t *e)
         }
 
         lv_obj_clear_flag(objects.settings_screen_lock_panel, LV_OBJ_FLAG_HIDDEN);
+#if defined(SEEED_MESHPAGER_X2)
+        // the generated creation order (OK/Cancel, then the keyboard toggle)
+        // puts OK ahead of the toggle in the focus walk although the toggle
+        // sits next to the PIN field - move the buttons behind it in the group
+        lv_group_remove_obj(objects.obj12__ok_button_w);
+        lv_group_remove_obj(objects.obj12__cancel_button_w);
+        lv_group_add_obj(lv_group_get_default(), objects.obj12__ok_button_w);
+        lv_group_add_obj(lv_group_get_default(), objects.obj12__cancel_button_w);
+        // typing is the primary action: land on the PIN field, the keyboard
+        // toggle is one step down
+        lv_group_focus_obj(objects.settings_screen_lock_password_textarea);
+#else
         lv_group_focus_obj(objects.settings_screen_lock_switch);
+#endif
         THIS->disablePanel(objects.controller_panel);
         THIS->disablePanel(objects.tab_page_basic_settings);
         THIS->activeSettings = eScreenLock;
@@ -3735,6 +3810,9 @@ void TFTView_320x240::ui_event_pin_screen_button(lv_event_t *e)
             pinKeys = 0;
             lv_label_set_text(objects.lock_screen_digits_label, hidden[pinKeys]);
             if (!screenLocked) {
+                // leaving the settings gate: un-hide the basic page the gate
+                // hid, so a later main load never shows a gutted panel
+                lv_obj_clear_flag(objects.tab_page_basic_settings, LV_OBJ_FLAG_HIDDEN);
                 lv_screen_load_anim(objects.main_screen, LV_SCR_LOAD_ANIM_FADE_IN, 100, 0, false);
             } else {
                 // TODO: init screen saver
@@ -3761,10 +3839,22 @@ void TFTView_320x240::ui_event_pin_screen_button(lv_event_t *e)
                     // unlock screen
                     pinKeys = 0;
                     screenLocked = false;
+#if defined(SEEED_MESHPAGER_X2)
+                    // one verified PIN covers the settings gate until the next lock
+                    settingsGateUnlocked = true;
+#endif
                     lv_obj_clear_flag(objects.tab_page_basic_settings, LV_OBJ_FLAG_HIDDEN);
                     lv_screen_load_anim(objects.main_screen, LV_SCR_LOAD_ANIM_FADE_IN, 100, 0, false);
                     lv_label_set_text(objects.lock_screen_digits_label, hidden[pinKeys]);
                 }
+#if defined(SEEED_MESHPAGER_X2)
+                else if (pinKeys == 6) {
+                    // wrong pin filled all six slots: the digit just pressed
+                    // restarts the entry instead of being silently ignored
+                    pinKeys = 0;
+                    lv_label_set_text(objects.lock_screen_digits_label, hidden[pinKeys]);
+                }
+#endif
             }
             break;
         }
@@ -5689,8 +5779,13 @@ void TFTView_320x240::ui_event_ok(lv_event_t *e)
             const char *pin = lv_textarea_get_text(objects.settings_screen_lock_password_textarea);
             bool screenLock = lv_obj_has_state(objects.settings_screen_lock_switch, LV_STATE_CHECKED);
             bool settingsLock = lv_obj_has_state(objects.settings_settings_lock_switch, LV_STATE_CHECKED);
-            if ((screenLock || settingsLock) && (atol(pin) == 0 || strlen(pin) != 6))
+            if ((screenLock || settingsLock) && (atol(pin) == 0 || strlen(pin) != 6)) {
+#if defined(SEEED_MESHPAGER_X2)
+                // visible feedback: point the focus ring at the field to fix
+                lv_group_focus_obj(objects.settings_screen_lock_password_textarea);
+#endif
                 return; // require pin != "000000"
+            }
             if ((screenLock != THIS->db.uiConfig.screen_lock) || settingsLock != THIS->db.uiConfig.settings_lock ||
                 atol(pin) != THIS->db.uiConfig.pin_code) {
                 THIS->db.uiConfig.screen_lock = screenLock;
@@ -5703,6 +5798,9 @@ void TFTView_320x240::ui_event_ok(lv_event_t *e)
             lv_snprintf(buf, 40, _("Lock: %s/%s"), screenLock ? _("on") : _("off"), settingsLock ? _("on") : _("off"));
             lv_label_set_text(objects.basic_settings_screen_lock_label, buf);
             lv_obj_add_flag(objects.settings_screen_lock_panel, LV_OBJ_FLAG_HIDDEN);
+            // mirror the cancel branch: leave the focus on the settings row
+            // instead of a button inside the now-hidden panel
+            lv_group_focus_obj(objects.basic_settings_screen_lock_button);
 
             break;
         }
@@ -7597,6 +7695,10 @@ void TFTView_320x240::screenSaving(bool enabled)
         lv_group_focus_obj(objects.blank_screen_button);
         screenLocked = true;
         screenUnlockRequest = false;
+#if defined(SEEED_MESHPAGER_X2)
+        // a blank re-arms the settings gate for the next unlock cycle
+        settingsGateUnlocked = false;
+#endif
     } else {
         if (THIS->db.uiConfig.screen_lock) {
             ILOG_DEBUG("showing lock screen");

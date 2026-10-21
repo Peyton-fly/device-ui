@@ -174,3 +174,12 @@ en:
   SD card error: ~
   SD unknown error: ~
   "Heap: %d (%d%%)\nLVGL: %d (%d%%)": ~
+  'About / Legal': ~
+  'About & Attribution': ~
+  'Google Maps': ~
+  '<unsupported>': ~
+  "LONG FAST\nLONG MODERATE\nLONG TURBO\nMEDIUM FAST\nMEDIUM SLOW\nMEDIUM TURBO\nSHORT FAST\nSHORT SLOW\nSHORT TURBO\nLITE FAST\nLITE SLOW\nNARROW FAST\nNARROW SLOW\nTINY FAST\nTINY SLOW": ~
+  "Firmware: meshtastic®\nVersion: %s\nLicense: GNU GPLv3\n\nSource code available at:\ngithub.com/meshtastic": ~
+  "[UI Framework]\nLVGL Graphics (MIT)\nCopyright (c) 2025\nLVGL Kft.\nlvgl.io": ~
+  "[UI Icons]\nDazzle Line Icons\nCC BY 4.0 by Dazzle UI\nvia svgrepo.com": ~
+  "[Map Data]\n© OpenStreetMap contributors\nData available under the\nOpen Database License\nopenstreetmap.org/copyright\n": ~

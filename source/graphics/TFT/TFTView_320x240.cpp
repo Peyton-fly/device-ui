@@ -1189,11 +1189,11 @@ void TFTView_320x240::apply_hotfix(void)
     };
 
     char fw[128];
-    snprintf(fw, sizeof(fw), ABOUT_FIRMWARE_TEXT, firmware_version);
+    snprintf(fw, sizeof(fw), _(ABOUT_FIRMWARE_TEXT), firmware_version);
     createLabel(objects.settings_about_panel, fw);
-    createLabel(objects.settings_about_panel, ABOUT_FRAMEWORK_TEXT);
-    createLabel(objects.settings_about_panel, ABOUT_ICONS_TEXT);
-    createLabel(objects.settings_about_panel, ABOUT_MAP_TEXT);
+    createLabel(objects.settings_about_panel, _(ABOUT_FRAMEWORK_TEXT));
+    createLabel(objects.settings_about_panel, _(ABOUT_ICONS_TEXT));
+    createLabel(objects.settings_about_panel, _(ABOUT_MAP_TEXT));
 }
 
 void TFTView_320x240::updateTheme(void)

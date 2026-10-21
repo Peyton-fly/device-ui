@@ -1858,6 +1858,15 @@ static const lv_i18n_phrase_t ja_singulars[] = {
     {"Position Broadcast: %s", "位置ブロードキャスト：%s"},
     {"GPS Polling: %s", "GPS ポーリング：%s"},
     {"At Boot Only", "起動時のみ"},
+    {"About / Legal", "情報 / 法的通知"},
+    {"About & Attribution", "情報とクレジット"},
+    {"Google Maps", "Google マップ"},
+    {"<unsupported>", "<未対応>"},
+    {"LONG FAST\nLONG MODERATE\nLONG TURBO\nMEDIUM FAST\nMEDIUM SLOW\nMEDIUM TURBO\nSHORT FAST\nSHORT SLOW\nSHORT TURBO\nLITE FAST\nLITE SLOW\nNARROW FAST\nNARROW SLOW\nTINY FAST\nTINY SLOW", "遠距離高速\n遠距離中速\n遠距離ターボ\n中距離高速\n中距離低速\n中距離ターボ\n近距離高速\n近距離低速\n近距離ターボ\nライト高速\nライト低速\nナロー高速\nナロー低速\nタイニー高速\nタイニー低速"},
+    {"Firmware: meshtastic®\nVersion: %s\nLicense: GNU GPLv3\n\nSource code available at:\ngithub.com/meshtastic", "ファームウェア：meshtastic®\nバージョン：%s\nライセンス：GNU GPLv3\n\nソースコード：\ngithub.com/meshtastic"},
+    {"[UI Framework]\nLVGL Graphics (MIT)\nCopyright (c) 2025\nLVGL Kft.\nlvgl.io", "[UI フレームワーク]\nLVGL Graphics (MIT)\nCopyright (c) 2025\nLVGL Kft.\nlvgl.io"},
+    {"[UI Icons]\nDazzle Line Icons\nCC BY 4.0 by Dazzle UI\nvia svgrepo.com", "[UI アイコン]\nDazzle Line Icons\nCC BY 4.0 by Dazzle UI\nvia svgrepo.com"},
+    {"[Map Data]\n© OpenStreetMap contributors\nData available under the\nOpen Database License\nopenstreetmap.org/copyright\n", "[地図データ]\n© OpenStreetMap contributors\nデータは Open Database License の下で提供\nopenstreetmap.org/copyright\n"},
     {NULL, NULL} // End mark
 };
 
@@ -3699,6 +3708,15 @@ static const lv_i18n_phrase_t zh_cn_singulars[] = {
     {"Position Broadcast: %s", "位置广播：%s"},
     {"GPS Polling: %s", "GPS 轮询：%s"},
     {"At Boot Only", "仅开机时"},
+    {"About / Legal", "关于 / 法律信息"},
+    {"About & Attribution", "关于与致谢"},
+    {"Google Maps", "Google 地图"},
+    {"<unsupported>", "<不支持>"},
+    {"LONG FAST\nLONG MODERATE\nLONG TURBO\nMEDIUM FAST\nMEDIUM SLOW\nMEDIUM TURBO\nSHORT FAST\nSHORT SLOW\nSHORT TURBO\nLITE FAST\nLITE SLOW\nNARROW FAST\nNARROW SLOW\nTINY FAST\nTINY SLOW", "远距快速\n远距适中\n远距极速\n中距快速\n中距慢速\n中距极速\n近距快速\n近距慢速\n近距极速\n轻量快速\n轻量慢速\n窄带快速\n窄带慢速\n极窄快速\n极窄慢速"},
+    {"Firmware: meshtastic®\nVersion: %s\nLicense: GNU GPLv3\n\nSource code available at:\ngithub.com/meshtastic", "固件：meshtastic®\n版本：%s\n许可证：GNU GPLv3\n\n源代码：\ngithub.com/meshtastic"},
+    {"[UI Framework]\nLVGL Graphics (MIT)\nCopyright (c) 2025\nLVGL Kft.\nlvgl.io", "[UI 框架]\nLVGL Graphics (MIT)\nCopyright (c) 2025\nLVGL Kft.\nlvgl.io"},
+    {"[UI Icons]\nDazzle Line Icons\nCC BY 4.0 by Dazzle UI\nvia svgrepo.com", "[UI 图标]\nDazzle Line Icons\nCC BY 4.0 by Dazzle UI\nvia svgrepo.com"},
+    {"[Map Data]\n© OpenStreetMap contributors\nData available under the\nOpen Database License\nopenstreetmap.org/copyright\n", "[地图数据]\n© OpenStreetMap contributors\n数据依据 Open Database License 提供\nopenstreetmap.org/copyright\n"},
     {NULL, NULL} // End mark
 };
 

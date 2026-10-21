@@ -586,7 +586,7 @@ void TFTView_320x240::ui_set_active(lv_obj_t *b, lv_obj_t *p, lv_obj_t *tp)
     // choose-node flows use keeps the original origin. The advanced settings
     // panel is a nav-bar-level mode toggle, not a drill-down.
     if (b == objects.settings_button && p != objects.controller_panel && p != ui_AdvancedSettingsPanel &&
-        activePanel != p) {
+        p != subPanelEntered && activePanel != p) {
         subPanelEntered = p;
         subReturnButton = activeButton;
         subReturnPanel = activePanel;
@@ -942,6 +942,7 @@ static void ui_event_checkable_arrow(lv_event_t *e); // defined with the other X
 static void ui_event_editable_ramp(lv_event_t *e);   // ditto
 static void ui_event_qr_modal_key(lv_event_t *e);    // ditto
 static void ui_event_scroll_page_key(lv_event_t *e); // ditto
+static void ui_event_statistics_table_key(lv_event_t *e); // ditto
 
 // tree walk: attach the X2 arrow handlers to every CHECKABLE widget and to
 // the dropdowns/sliders - the lv_obj base class would otherwise toggle
@@ -1072,6 +1073,9 @@ void TFTView_320x240::apply_hotfix(void)
     // on to ui_event_ScreenKey (RETURN/LEFT climb back to the settings list)
     for (lv_obj_t *page : scrollPages)
         lv_obj_add_event_cb(page, ui_event_scroll_page_key, LV_EVENT_KEY, NULL);
+    // statistics table: RIGHT wraps within the row (All -> Name); the class
+    // handler's wrap into the next row never runs
+    lv_obj_add_event_cb(objects.statistics_table, ui_event_statistics_table_key, KEY_PREPROCESS, NULL);
 
     // the hidden boot logo arc auto-joins the default group and would be an
     // invisible focus stop
@@ -1656,6 +1660,19 @@ void TFTView_320x240::ui_event_ScreenKey(lv_event_t *e)
                 // after ui_set_active's own tail focus
                 THIS->ui_set_active(objects.messages_button, objects.chats_panel, objects.top_chats_panel);
                 focusFirstInScope(objects.chats_panel);
+            } else if (THIS->chooseNodeSignalScanner && THIS->activePanel == objects.nodes_panel) {
+                // choose-node abort: RETURN on the pick list goes back to the
+                // scanner page, restoring the hop filter the pick overrode
+                THIS->chooseNodeSignalScanner = false;
+                THIS->ui_set_active(objects.settings_button, objects.signal_scanner_panel,
+                                    objects.top_signal_scanner_panel);
+                lv_dropdown_set_selected(objects.nodes_filter_hops_dropdown, THIS->selectedHops);
+                THIS->updateNodesFiltered(true);
+                THIS->updateNodesStatus();
+            } else if (THIS->chooseNodeTraceRoute && THIS->activePanel == objects.nodes_panel) {
+                // same abort path for the trace route target picker
+                THIS->chooseNodeTraceRoute = false;
+                THIS->ui_set_active(objects.settings_button, objects.trace_route_panel, objects.top_trace_route_panel);
             } else if (subReturnPanel && THIS->activePanel == subPanelEntered) {
                 // settings drill-down (about/tools): restore the panel the
                 // page was entered from, ring back on the entry row; origins
@@ -1875,6 +1892,29 @@ static void ui_event_scroll_page_key(lv_event_t *e)
         if (key == LV_KEY_UP)
             dy = -dy;
         lv_obj_scroll_to_y(page, lv_obj_get_scroll_y(page) + dy, LV_ANIM_ON);
+        lv_event_stop_processing(e);
+    }
+}
+
+// X2 d-pad: the statistics table wraps RIGHT past the All column into the
+// next row; X2 keeps the row - RIGHT at All returns to the Name column of
+// the same row, LEFT at Name stays. UP/DOWN keep the class row walk.
+static void ui_event_statistics_table_key(lv_event_t *e)
+{
+    if (lv_event_get_code(e) != LV_EVENT_KEY)
+        return;
+    uint32_t key = lv_event_get_key(e);
+    if (key != LV_KEY_LEFT && key != LV_KEY_RIGHT)
+        return;
+    lv_obj_t *table = lv_event_get_target_obj(e);
+    uint32_t row = 0, col = 0;
+    lv_table_get_selected_cell(table, &row, &col);
+    if (row == LV_TABLE_CELL_NONE || col == LV_TABLE_CELL_NONE)
+        return; // no selection yet - let the class handler pick (0, 0)
+    if (key == LV_KEY_RIGHT && col >= lv_table_get_column_count(table) - 1) {
+        lv_table_set_selected_cell(table, row, 0);
+        lv_event_stop_processing(e);
+    } else if (key == LV_KEY_LEFT && col == 0) {
         lv_event_stop_processing(e);
     }
 }
@@ -2376,6 +2416,12 @@ void TFTView_320x240::ui_event_NodesButton(lv_event_t *e)
             ignoreClicked = false;
             return;
         }
+#if defined(SEEED_MESHPAGER_X2)
+        // entering the nodes list from the nav bar ends any pending
+        // choose-node pick (scanner / trace route)
+        THIS->chooseNodeSignalScanner = false;
+        THIS->chooseNodeTraceRoute = false;
+#endif
         THIS->ui_set_active(objects.nodes_button, objects.nodes_panel, objects.top_nodes_panel);
         if (filterNeedsUpdate) {
             THIS->updateNodesFiltered(true);
@@ -2780,6 +2826,12 @@ void TFTView_320x240::ui_event_OnlineNodesButton(lv_event_t *e)
             return;
         }
         lv_obj_set_state(objects.nodes_filter_offline_switch, LV_STATE_CHECKED, true);
+#if defined(SEEED_MESHPAGER_X2)
+        // entering the nodes list from the top bar ends any pending
+        // choose-node pick (scanner / trace route)
+        THIS->chooseNodeSignalScanner = false;
+        THIS->chooseNodeTraceRoute = false;
+#endif
         THIS->ui_set_active(objects.nodes_button, objects.nodes_panel, objects.top_nodes_panel);
         THIS->updateNodesFiltered(true);
     } else if (event_code == LV_EVENT_LONG_PRESSED) {

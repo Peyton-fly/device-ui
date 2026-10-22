@@ -943,6 +943,7 @@ static void ui_event_editable_ramp(lv_event_t *e);   // ditto
 static void ui_event_qr_modal_key(lv_event_t *e);    // ditto
 static void ui_event_scroll_page_key(lv_event_t *e); // ditto
 static void ui_event_statistics_table_key(lv_event_t *e); // ditto
+static void ui_event_statistics_table_editguard(lv_event_t *e); // ditto
 
 // tree walk: attach the X2 arrow handlers to every CHECKABLE widget and to
 // the dropdowns/sliders - the lv_obj base class would otherwise toggle
@@ -1076,6 +1077,17 @@ void TFTView_320x240::apply_hotfix(void)
     // statistics table: RIGHT wraps within the row (All -> Name); the class
     // handler's wrap into the next row never runs
     lv_obj_add_event_cb(objects.statistics_table, ui_event_statistics_table_key, KEY_PREPROCESS, NULL);
+    // statistics table: keep the group out of LVGL edit mode on ENTER release
+    lv_obj_add_event_cb(objects.statistics_table, ui_event_statistics_table_editguard, LV_EVENT_FOCUSED, NULL);
+    // selected cell: lv_table draws it with the table's LV_PART_ITEMS styles
+    // at the table's focus state and the generated styles define none, so the
+    // cell inherits the default style - pin the focus-blue selection here
+    static lv_style_t style_stats_cell_focus;
+    lv_style_init(&style_stats_cell_focus);
+    lv_style_set_bg_color(&style_stats_cell_focus, lv_color_hex(0x2196f3));
+    lv_style_set_bg_opa(&style_stats_cell_focus, LV_OPA_COVER);
+    lv_style_set_text_color(&style_stats_cell_focus, lv_color_hex(0xffffff));
+    lv_obj_add_style(objects.statistics_table, &style_stats_cell_focus, LV_PART_ITEMS | LV_STATE_FOCUSED);
 
     // the hidden boot logo arc auto-joins the default group and would be an
     // invisible focus stop
@@ -1898,13 +1910,14 @@ static void ui_event_scroll_page_key(lv_event_t *e)
 
 // X2 d-pad: the statistics table wraps RIGHT past the All column into the
 // next row; X2 keeps the row - RIGHT at All returns to the Name column of
-// the same row, LEFT at Name stays. UP/DOWN keep the class row walk.
+// the same row, LEFT at Name stays. UP/DOWN keep the class row walk and
+// wrap between the first and last row.
 static void ui_event_statistics_table_key(lv_event_t *e)
 {
     if (lv_event_get_code(e) != LV_EVENT_KEY)
         return;
     uint32_t key = lv_event_get_key(e);
-    if (key != LV_KEY_LEFT && key != LV_KEY_RIGHT)
+    if (key != LV_KEY_LEFT && key != LV_KEY_RIGHT && key != LV_KEY_UP && key != LV_KEY_DOWN)
         return;
     lv_obj_t *table = lv_event_get_target_obj(e);
     uint32_t row = 0, col = 0;
@@ -1916,7 +1929,27 @@ static void ui_event_statistics_table_key(lv_event_t *e)
         lv_event_stop_processing(e);
     } else if (key == LV_KEY_LEFT && col == 0) {
         lv_event_stop_processing(e);
+    } else if (key == LV_KEY_DOWN && row == lv_table_get_row_count(table) - 1) {
+        // the class handler clamps at the edges; UP/DOWN wrap in the row
+        lv_table_set_selected_cell(table, 0, col);
+        lv_obj_scroll_to_y(table, 0, LV_ANIM_ON);
+        lv_event_stop_processing(e);
+    } else if (key == LV_KEY_UP && row == 0) {
+        lv_table_set_selected_cell(table, lv_table_get_row_count(table) - 1, col);
+        lv_obj_scroll_by_bounded(table, 0, lv_obj_get_content_height(table), LV_ANIM_ON);
+        lv_event_stop_processing(e);
     }
+}
+
+// X2 d-pad: LVGL toggles group edit mode on ENTER-release for editable
+// widgets (lv_indev.c); the X2 key UI never uses edit mode, so flip it
+// straight back - the toggle re-delivers LV_EVENT_FOCUSED (lv_group.c)
+static void ui_event_statistics_table_editguard(lv_event_t *e)
+{
+    lv_obj_t *table = lv_event_get_target_obj(e);
+    lv_group_t *group = lv_obj_get_group(table);
+    if (group && lv_group_get_editing(group))
+        lv_group_set_editing(group, false);
 }
 
 static void ui_event_checkable_arrow(lv_event_t *e)
@@ -4579,18 +4612,23 @@ void TFTView_320x240::ui_event_signal_scanner(lv_event_t *e)
         lv_label_set_text(objects.signal_scanner_node_button_label, _("choose\nnode"));
         lv_obj_add_state(objects.signal_scanner_start_button, LV_STATE_DISABLED);
     }
-    lv_label_set_text(objects.signal_scanner_start_label, _("Start"));
+    // a running scan keeps its label
+    if (!spinnerButton)
+        lv_label_set_text(objects.signal_scanner_start_label, _("Start"));
     THIS->ui_set_active(objects.settings_button, objects.signal_scanner_panel, objects.top_signal_scanner_panel);
 }
 
 void TFTView_320x240::ui_event_signal_scanner_node(lv_event_t *e)
 {
-    THIS->chooseNodeSignalScanner = true;
-    THIS->selectedHops = lv_dropdown_get_selected(objects.nodes_filter_hops_dropdown);
-    lv_dropdown_set_selected(objects.nodes_filter_hops_dropdown, 7); // 0 hops away
-    THIS->ui_set_active(objects.nodes_button, objects.nodes_panel, objects.top_nodes_panel);
-    THIS->updateNodesFiltered(true);
-    THIS->updateNodesStatus();
+    // a running scan owns the page
+    if (!spinnerButton) {
+        THIS->chooseNodeSignalScanner = true;
+        THIS->selectedHops = lv_dropdown_get_selected(objects.nodes_filter_hops_dropdown);
+        lv_dropdown_set_selected(objects.nodes_filter_hops_dropdown, 7); // 0 hops away
+        THIS->ui_set_active(objects.nodes_button, objects.nodes_panel, objects.top_nodes_panel);
+        THIS->updateNodesFiltered(true);
+        THIS->updateNodesStatus();
+    }
 }
 
 void TFTView_320x240::ui_event_signal_scanner_start(lv_event_t *e)
@@ -4613,16 +4651,19 @@ void TFTView_320x240::ui_event_signal_scanner_start(lv_event_t *e)
             }
         } else if (event_code == LV_EVENT_LONG_PRESSED) {
             ignoreClicked = true;
-            lv_obj_t *obj = lv_spinner_create(objects.signal_scanner_panel);
-            spinnerButton = obj;
-            spinnerButton->user_data = (void *)objects.signal_scanner_panel;
-            lv_spinner_set_anim_params(obj, 5000, 300);
-            lv_obj_set_pos(obj, 0, -50);
-            lv_obj_set_size(obj, 68, 68);
-            lv_obj_set_style_align(obj, LV_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
-            add_style_spinner_style(obj);
-            lv_label_set_text(objects.signal_scanner_start_label, "30s");
-            THIS->scans = 6 + 1;
+            // keep the spinner of the running scan
+            if (!spinnerButton) {
+                lv_obj_t *obj = lv_spinner_create(objects.signal_scanner_panel);
+                spinnerButton = obj;
+                spinnerButton->user_data = (void *)objects.signal_scanner_panel;
+                lv_spinner_set_anim_params(obj, 5000, 300);
+                lv_obj_set_pos(obj, 0, -50);
+                lv_obj_set_size(obj, 68, 68);
+                lv_obj_set_style_align(obj, LV_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
+                add_style_spinner_style(obj);
+                lv_label_set_text(objects.signal_scanner_start_label, "30s");
+                THIS->scans = 6 + 1;
+            }
         }
     }
 }
@@ -4737,7 +4778,9 @@ void TFTView_320x240::ui_event_trace_route_node(lv_event_t *e)
     // navigate to node in node list
     lv_obj_t *panel = (lv_obj_t *)e->user_data;
     THIS->ui_set_active(objects.nodes_button, objects.nodes_panel, objects.top_nodes_panel);
-    lv_obj_scroll_to_view(panel, LV_ANIM_ON);
+    // unknown route nodes have no panel in the node list
+    if (panel)
+        lv_obj_scroll_to_view(panel, LV_ANIM_ON);
 }
 
 void TFTView_320x240::removeSpinner(void)
@@ -5105,6 +5148,13 @@ void TFTView_320x240::ui_event_statistics_table(lv_event_t *e)
         lv_draw_fill_dsc_t *fill_draw_dsc = lv_draw_task_get_fill_dsc(draw_task);
         if (fill_draw_dsc) {
             uint32_t row = base_dsc->id1;
+            // the selected cell keeps its focus style's fill instead of the
+            // header tint / zebra recolor
+            uint32_t selRow = 0, selCol = 0;
+            lv_table_get_selected_cell(objects.statistics_table, &selRow, &selCol);
+            if (lv_obj_has_state(objects.statistics_table, LV_STATE_FOCUSED) && row == selRow &&
+                base_dsc->id2 == selCol)
+                return;
             if (row == 0) {
                 fill_draw_dsc->color = lv_color_mix(lv_palette_main(LV_PALETTE_BLUE), fill_draw_dsc->color, LV_OPA_20);
             }
@@ -7390,6 +7440,13 @@ void TFTView_320x240::handleResponse(uint32_t from, uint32_t id, const meshtasti
     ILOG_DEBUG("handleResponse: trace route has %d / %d hops", route.route_count, route.route_back_count);
     lv_obj_add_flag(objects.start_button_panel, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(objects.hop_routes_panel, LV_OBJ_FLAG_HIDDEN);
+    // the route replaces the start button: end the scan state
+    removeSpinner();
+    lv_obj_set_style_outline_color(objects.trace_route_start_button, colorMesh, LV_PART_MAIN | LV_STATE_DEFAULT);
+#if defined(SEEED_MESHPAGER_X2)
+    // never leave keypad focus on the hidden start button
+    focusFirstInScope(objects.trace_route_panel);
+#endif
 
     if (id && requests.findRequest(id).type == ResponseHandler::TraceRouteRequest) {
         requests.removeRequest(id);
@@ -7423,6 +7480,12 @@ void TFTView_320x240::addNodeToTraceRoute(uint32_t nodeNum, lv_obj_t *panel)
     lv_obj_set_pos(btn, 0, 0);
     lv_obj_set_size(btn, LV_PCT(100), 38);
     add_style_settings_button_style(btn);
+    // runtime-created row: needs the key bubbling and focus ring the
+    // build-time widgets get from addKeyBubbleFlags/addKeyFocusStyles
+    lv_obj_add_flag(btn, LV_OBJ_FLAG_EVENT_BUBBLE);
+#if defined(SEEED_MESHPAGER_X2)
+    applyKeyFocusStyle(btn);
+#endif
     lv_obj_set_style_align(btn, LV_ALIGN_TOP_MID, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_top(btn, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_bottom(btn, 0, LV_PART_MAIN | LV_STATE_DEFAULT);

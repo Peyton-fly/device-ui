@@ -2182,6 +2182,44 @@ void create_screen_main_screen() {
                                     }
                                 }
                                 {
+                                    // BasicSettingsSmartPosition (plain obj container, not a button:
+                                    // lv_button auto-joins the focus group and would add a dead stop
+                                    // beside the switch)
+                                    lv_obj_t *obj = lv_obj_create(parent_obj);
+                                    lv_obj_set_pos(obj, 0, 0);
+                                    lv_obj_set_size(obj, LV_PCT(95), 30);
+                                    add_style_settings_button_style(obj);
+                                    lv_obj_set_style_align(obj, LV_ALIGN_TOP_MID, LV_PART_MAIN | LV_STATE_DEFAULT);
+                                    lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
+                                    {
+                                        lv_obj_t *parent_obj = obj;
+                                        {
+                                            // BasicSettingsSmartPositionLabel
+                                            lv_obj_t *obj = lv_label_create(parent_obj);
+                                            objects.basic_settings_smart_position_label = obj;
+                                            lv_obj_set_pos(obj, 0, 0);
+                                            lv_obj_set_size(obj, LV_PCT(100), LV_SIZE_CONTENT);
+                                            lv_label_set_long_mode(obj, LV_LABEL_LONG_DOT);
+                                            lv_obj_set_style_align(obj, LV_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
+                                            lv_label_set_text(obj, _("Smart Position"));
+                                        }
+                                        {
+                                            // BasicSettingsSmartPositionSwitch
+                                            lv_obj_t *obj = lv_switch_create(parent_obj);
+                                            objects.basic_settings_smart_position_switch = obj;
+                                            lv_obj_set_pos(obj, -10, -3);
+                                            lv_obj_set_size(obj, 50, 20);
+                                            lv_obj_set_style_bg_color(obj, lv_color_hex(0xb4b4b4), LV_PART_MAIN | LV_STATE_DEFAULT);
+                                            lv_obj_set_style_border_color(obj, lv_color_hex(0x606060), LV_PART_MAIN | LV_STATE_DEFAULT);
+                                            lv_obj_set_style_align(obj, LV_ALIGN_RIGHT_MID, LV_PART_MAIN | LV_STATE_DEFAULT);
+                                            lv_obj_set_style_bg_color(obj, lv_color_hex(0x8ff498), LV_PART_MAIN | LV_STATE_CHECKED);
+                                            lv_obj_set_style_bg_color(obj, lv_color_hex(0xffffff), LV_PART_KNOB | LV_STATE_DEFAULT);
+                                            lv_obj_set_style_bg_color(obj, lv_color_hex(0x67ea94), LV_PART_INDICATOR | LV_STATE_CHECKED);
+                                            lv_obj_set_style_bg_color(obj, lv_color_hex(0x67ea94), LV_PART_INDICATOR | LV_STATE_PRESSED);
+                                        }
+                                    }
+                                }
+                                {
                                     // BasicSettingsResetButton
                                     lv_obj_t *obj = lv_button_create(parent_obj);
                                     objects.basic_settings_reset_button = obj;

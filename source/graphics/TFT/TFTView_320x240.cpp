@@ -1417,6 +1417,8 @@ void TFTView_320x240::ui_events_init(void)
     lv_obj_add_event_cb(objects.basic_settings_about_button, ui_event_about_button, LV_EVENT_CLICKED, NULL);
     lv_obj_add_event_cb(objects.basic_settings_pos_broadcast_button, ui_event_pos_broadcast_button, LV_EVENT_CLICKED, NULL);
     lv_obj_add_event_cb(objects.basic_settings_gps_poll_button, ui_event_gps_poll_button, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(objects.basic_settings_smart_position_switch, ui_event_smart_position_switch, LV_EVENT_VALUE_CHANGED,
+                        NULL);
 
     lv_obj_add_event_cb(objects.reboot_button, ui_event_device_reboot_button, LV_EVENT_CLICKED, NULL);
     lv_obj_add_event_cb(objects.progmode_button, ui_event_device_progmode_button, LV_EVENT_ALL, NULL);
@@ -3486,6 +3488,16 @@ void TFTView_320x240::ui_event_gps_poll_button(lv_event_t *e)
         THIS->disablePanel(objects.controller_panel);
         THIS->disablePanel(objects.tab_page_basic_settings);
         THIS->activeSettings = eGpsPolling;
+    }
+}
+
+void TFTView_320x240::ui_event_smart_position_switch(lv_event_t *e)
+{
+    bool enabled = lv_obj_has_state(objects.basic_settings_smart_position_switch, LV_STATE_CHECKED);
+    if (enabled != THIS->db.config.position.position_broadcast_smart_enabled) {
+        THIS->db.config.position.position_broadcast_smart_enabled = enabled;
+        THIS->controller->sendConfig(meshtastic_Config_PositionConfig{THIS->db.config.position});
+        THIS->notifyReboot(true);
     }
 }
 
@@ -8077,6 +8089,7 @@ void TFTView_320x240::updatePositionConfig(const meshtastic_Config_PositionConfi
     Themes::recolorButton(objects.home_location_button, cfg.gps_mode == meshtastic_Config_PositionConfig_GpsMode_ENABLED);
     setPosBroadcastLabel(cfg.position_broadcast_secs);
     setGpsPollLabel(cfg.gps_update_interval);
+    lv_obj_set_state(objects.basic_settings_smart_position_switch, LV_STATE_CHECKED, cfg.position_broadcast_smart_enabled);
 }
 
 void TFTView_320x240::updatePowerConfig(const meshtastic_Config_PowerConfig &cfg)

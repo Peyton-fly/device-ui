@@ -575,6 +575,8 @@ typedef struct _objects_t {
     lv_obj_t *basic_settings_pos_broadcast_label;
     lv_obj_t *basic_settings_gps_poll_button;
     lv_obj_t *basic_settings_gps_poll_label;
+    lv_obj_t *basic_settings_smart_position_label;
+    lv_obj_t *basic_settings_smart_position_switch;
     lv_obj_t *settings_pos_broadcast_panel;
     lv_obj_t *settings_pos_broadcast_dropdown;
     lv_obj_t *obj28;

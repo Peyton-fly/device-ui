@@ -534,6 +534,9 @@ class TFTView_320x240 : public MeshtasticView
     lv_obj_t *cannedPanel = nullptr;                      // canned message picker overlay
     char cannedMessages[201] = {0};                       // '|'-separated phrases from the admin API
     bool cannedInputHadText = false;                      // chat input had text when ENTER was pressed down
+    static void attachPos1ToGroup(lv_obj_t *panel);       // expanded row with position: join its pos1 label to the panel group
+    static void detachPos1FromGroup(lv_obj_t *panel);     // collapse: remove the label again (refocus the row button if it held focus)
+    static void pos1Highlight(lv_obj_t *panel, bool on);  // selected marker for the position label: yellow text while focused
 #endif
     std::unordered_map<uint32_t, lv_obj_t *> nodeObjects; // nodeObjects displayed on map
     // extended default device profile struct with additional required data

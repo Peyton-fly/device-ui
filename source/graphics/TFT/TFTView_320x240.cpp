@@ -1610,6 +1610,39 @@ void TFTView_320x240::ui_event_ScreenKey(lv_event_t *e)
             bool native = target && objConsumesArrows(target) &&
                           !(target->class_p == &lv_textarea_class && lv_textarea_get_one_line(target));
             if (!native) {
+#if defined(SEEED_MESHPAGER_X2)
+                // expanded-row drill-in: DOWN from the focused row button
+                // focuses its position label (only while the label is in the
+                // group, i.e. row expanded and position known); from the
+                // label UP returns to the row button, DOWN moves on to the
+                // next row
+                if (currentPanel) {
+                    lv_obj_t *pos1 = currentPanel->LV_OBJ_IDX(node_pos1_idx);
+                    lv_obj_t *rowBtn = currentPanel->LV_OBJ_IDX(node_btn_idx);
+                    if (target == pos1) {
+                        if (c == LV_KEY_UP) {
+                            pos1Highlight(currentPanel, false);
+                            lv_group_focus_obj(rowBtn);
+                        } else {
+                            pos1Highlight(currentPanel, false);
+                            navigateScope(rowBtn, true, NULL);
+                            // expanded row is the last row: the walk wraps
+                            // straight back onto the label - step past it
+                            if (lv_group_get_focused(THIS->defaultPanelGroup) == pos1)
+                                navigateScope(pos1, true, NULL);
+                        }
+                        lv_event_stop_processing(e);
+                        return;
+                    }
+                    if (target == rowBtn && c == LV_KEY_DOWN &&
+                        lv_obj_get_group(pos1) == THIS->defaultPanelGroup) {
+                        lv_group_focus_obj(pos1);
+                        pos1Highlight(currentPanel, true);
+                        lv_event_stop_processing(e);
+                        return;
+                    }
+                }
+#endif
                 // inside a chat, UP/DOWN browse only the message bubbles: the
                 // input line / keyboard toggle pair is a LEFT/RIGHT domain
                 lv_obj_t *chatScope = (target && THIS->activeMsgContainer &&
@@ -1617,6 +1650,16 @@ void TFTView_320x240::ui_event_ScreenKey(lv_event_t *e)
                                           ? THIS->activeMsgContainer
                                           : NULL;
                 navigateScope(target, c == LV_KEY_DOWN, chatScope);
+#if defined(SEEED_MESHPAGER_X2)
+                // the label sits at the group tail: a wrapping walk (DOWN
+                // from the last row / UP from the first) must not park on it
+                // - continue from the row button in the same direction
+                if (currentPanel && target != currentPanel->LV_OBJ_IDX(node_btn_idx) &&
+                    lv_group_get_focused(THIS->defaultPanelGroup) ==
+                        currentPanel->LV_OBJ_IDX(node_pos1_idx)) {
+                    navigateScope(currentPanel->LV_OBJ_IDX(node_btn_idx), c == LV_KEY_DOWN, NULL);
+                }
+#endif
                 lv_event_stop_processing(e);
             }
             return;
@@ -1654,6 +1697,12 @@ void TFTView_320x240::ui_event_ScreenKey(lv_event_t *e)
                 // popup) must not stay dangling, and the release is
                 // swallowed since focus moves mid-press. Dropdowns and
                 // sliders keep LEFT for their native behavior.
+#if defined(SEEED_MESHPAGER_X2)
+                // same as ESC above: leaving from the position label drops
+                // its selection marker
+                if (currentPanel && target == currentPanel->LV_OBJ_IDX(node_pos1_idx))
+                    pos1Highlight(currentPanel, false);
+#endif
                 THIS->cleanupAllOverlays();
                 lv_indev_wait_release(lv_indev_get_act());
                 lv_obj_remove_state(target, LV_STATE_PRESSED);
@@ -1670,6 +1719,12 @@ void TFTView_320x240::ui_event_ScreenKey(lv_event_t *e)
         if (c == LV_KEY_ESC) {
             // Clean up any overlays (keyboard, QR code, popups, settings dialogs) before returning to menu
             THIS->cleanupAllOverlays();
+#if defined(SEEED_MESHPAGER_X2)
+            // leaving the panel straight from the position label: drop its
+            // selection marker (collapse/switch-row detach already do)
+            if (currentPanel && lv_event_get_target_obj(e) == currentPanel->LV_OBJ_IDX(node_pos1_idx))
+                pos1Highlight(currentPanel, false);
+#endif
             if (THIS->activePanel == objects.messages_panel) {
                 // conversation -> chat list; the explicit focus must run
                 // after ui_set_active's own tail focus
@@ -2493,6 +2548,9 @@ void TFTView_320x240::ui_event_NodeButton(lv_event_t *e)
             nodeNum = THIS->ownNode;
         lv_obj_t *panel = THIS->nodes[nodeNum];
         if (currentPanel) {
+#if defined(SEEED_MESHPAGER_X2)
+            detachPos1FromGroup(currentPanel);
+#endif
             // create animation to shrink other panel
             animRunning = true;
             static lv_anim_t a;
@@ -2521,7 +2579,13 @@ void TFTView_320x240::ui_event_NodeButton(lv_event_t *e)
             lv_anim_start(&a);
             currentPanel = panel;
             currentNode = nodeNum;
+#if defined(SEEED_MESHPAGER_X2)
+            attachPos1ToGroup(panel);
+#endif
         } else {
+#if defined(SEEED_MESHPAGER_X2)
+            detachPos1FromGroup(panel);
+#endif
             currentPanel = nullptr;
             currentNode = 0;
         }
@@ -4192,10 +4256,58 @@ void TFTView_320x240::ui_event_chatNodeButton(lv_event_t *e)
     }
 }
 
+#if defined(SEEED_MESHPAGER_X2)
+// keypad reachability of the position row: while a node row is expanded and
+// has a position, its pos1 label is a member of the panel group (tail insert
+// - it never sits between the row buttons), so UP/DOWN can focus it and
+// ENTER fires the CLICKED handler below. Detach hands focus back to the row
+// button when the label held it, so the group never keeps a stale focus.
+void TFTView_320x240::attachPos1ToGroup(lv_obj_t *panel)
+{
+    if (!panel || !THIS->defaultPanelGroup)
+        return;
+    lv_obj_t *pos1 = panel->LV_OBJ_IDX(node_pos1_idx);
+    int32_t lat = (long)pos1->user_data;
+    int32_t lon = (long)panel->LV_OBJ_IDX(node_pos2_idx)->user_data;
+    if (!lat || !lon)
+        return;
+    if (lv_obj_get_group(pos1) == THIS->defaultPanelGroup)
+        return;
+    lv_group_add_obj(THIS->defaultPanelGroup, pos1);
+}
+
+// selected-position marker: swap the label's own text color (local
+// DEFAULT-state style, the same channel its resting blue-green text uses)
+void TFTView_320x240::pos1Highlight(lv_obj_t *panel, bool on)
+{
+    if (!panel)
+        return;
+    lv_obj_t *pos1 = panel->LV_OBJ_IDX(node_pos1_idx);
+    lv_obj_set_style_text_color(pos1, on ? colorYellow : colorBlueGreen, LV_PART_MAIN | LV_STATE_DEFAULT);
+}
+
+void TFTView_320x240::detachPos1FromGroup(lv_obj_t *panel)
+{
+    if (!panel || !THIS->defaultPanelGroup)
+        return;
+    lv_obj_t *pos1 = panel->LV_OBJ_IDX(node_pos1_idx);
+    if (lv_obj_get_group(pos1) != THIS->defaultPanelGroup)
+        return;
+    pos1Highlight(panel, false);
+    if (lv_group_get_focused(THIS->defaultPanelGroup) == pos1)
+        lv_group_focus_obj(panel->LV_OBJ_IDX(node_btn_idx));
+    lv_group_remove_obj(pos1);
+}
+#endif
+
 void TFTView_320x240::ui_event_positionButton(lv_event_t *e)
 {
     // navigate to position in map
     lv_obj_t *p = (lv_obj_t *)e->user_data;
+#if defined(SEEED_MESHPAGER_X2)
+    // jumping away leaves the position label - drop its selection marker
+    pos1Highlight(p, false);
+#endif
     int32_t lat = (long)p->LV_OBJ_IDX(node_pos1_idx)->user_data;
     int32_t lon = (long)p->LV_OBJ_IDX(node_pos2_idx)->user_data;
     if (lat && lon) {
@@ -6793,6 +6905,13 @@ void TFTView_320x240::addNode(uint32_t nodeNum, uint8_t ch, const char *userShor
     lv_obj_set_style_align(ui_PositionLabel, LV_ALIGN_TOP_LEFT, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(ui_PositionLabel, colorBlueGreen, LV_PART_MAIN | LV_STATE_DEFAULT);
     ui_PositionLabel->user_data = 0; // store latitude
+#if defined(SEEED_MESHPAGER_X2)
+    // keypad reachability: bubble key events up to the screen handler and
+    // scroll into view when focused (CLICKABLE matches the touch handler
+    // attached in addOrUpdateMap); selection marker = pos1Highlight
+    lv_obj_add_flag(ui_PositionLabel, lv_obj_flag_t(LV_OBJ_FLAG_EVENT_BUBBLE | LV_OBJ_FLAG_SCROLL_ON_FOCUS |
+                                                     LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CLICK_FOCUSABLE));
+#endif
     // Position2Label
     lv_obj_t *ui_Position2Label = lv_label_create(p);
     lv_obj_set_pos(ui_Position2Label, -5, 63);
@@ -7026,6 +7145,19 @@ void TFTView_320x240::updatePosition(uint32_t nodeNum, int32_t lat, int32_t lon,
         panel->LV_OBJ_IDX(node_pos2_idx)->user_data = (void *)lon;
         lv_obj_remove_flag(panel->LV_OBJ_IDX(node_pos1_idx), LV_OBJ_FLAG_HIDDEN);
         lv_obj_remove_flag(panel->LV_OBJ_IDX(node_pos2_idx), LV_OBJ_FLAG_HIDDEN);
+#if defined(SEEED_MESHPAGER_X2)
+        // position arrived for a row that may already be expanded
+        if (panel && panel == currentPanel)
+            attachPos1ToGroup(panel);
+        // the own row never passes through addOrUpdateMap, so its position
+        // label never receives the jump-to-map CLICKED handler - attach it
+        // here (remove first: own position updates repeat)
+        if (nodeNum == ownNode) {
+            lv_obj_t *pos1 = panel->LV_OBJ_IDX(node_pos1_idx);
+            lv_obj_remove_event_cb(pos1, ui_event_positionButton);
+            lv_obj_add_event_cb(pos1, ui_event_positionButton, LV_EVENT_CLICKED, (void *)panel);
+        }
+#endif
     }
 
     applyNodesFilter(nodeNum);
@@ -7621,6 +7753,14 @@ void TFTView_320x240::purgeNode(uint32_t nodeNum)
         nodesOnline--;
 
     ILOG_INFO("removing oldest node 0x%08x", oldest);
+#if defined(SEEED_MESHPAGER_X2)
+    // purging the expanded row: clear the expansion reference before delete
+    // (the label leaves the panel group automatically with its object)
+    if (p == currentPanel) {
+        currentPanel = nullptr;
+        currentNode = 0;
+    }
+#endif
     lv_obj_delete(p);
     {
         auto it = messages.find(oldest);

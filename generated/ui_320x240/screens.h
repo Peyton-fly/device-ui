@@ -587,8 +587,14 @@ typedef struct _objects_t {
     lv_obj_t *obj29__ok_cancel_panel_w;
     lv_obj_t *obj29__ok_button_w;
     lv_obj_t *obj29__cancel_button_w;
+    lv_obj_t *obj30;
+    lv_obj_t *obj30__ok_cancel_panel_w;
+    lv_obj_t *obj30__ok_button_w;
+    lv_obj_t *obj30__cancel_button_w;
+    lv_obj_t *basic_settings_smart_position_button;
     lv_obj_t *basic_settings_smart_position_label;
-    lv_obj_t *basic_settings_smart_position_switch;
+    lv_obj_t *settings_smart_position_panel;
+    lv_obj_t *settings_smart_position_dropdown;
 } objects_t;
 
 extern objects_t objects;

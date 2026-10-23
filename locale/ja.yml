@@ -172,6 +172,7 @@ ja:
   'Position Broadcast: %s': '位置ブロードキャスト：%s'
   'GPS Polling: %s': 'GPS ポーリング：%s'
   'Smart Position': スマート位置
+  'Smart Position: %s': 'スマート位置：%s'
   'At Boot Only': 起動時のみ
   'About / Legal': 情報 / 法的表記
   'About & Attribution': 情報とクレジット表記

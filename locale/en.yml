@@ -30,6 +30,7 @@ en:
   'Position Broadcast: %s': ~
   'GPS Polling: %s': ~
   'Smart Position': ~
+  'Smart Position: %s': ~
   'At Boot Only': ~
   Configuration Reset: ~
   Backup & Restore: ~

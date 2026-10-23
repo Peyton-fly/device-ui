@@ -1417,8 +1417,7 @@ void TFTView_320x240::ui_events_init(void)
     lv_obj_add_event_cb(objects.basic_settings_about_button, ui_event_about_button, LV_EVENT_CLICKED, NULL);
     lv_obj_add_event_cb(objects.basic_settings_pos_broadcast_button, ui_event_pos_broadcast_button, LV_EVENT_CLICKED, NULL);
     lv_obj_add_event_cb(objects.basic_settings_gps_poll_button, ui_event_gps_poll_button, LV_EVENT_CLICKED, NULL);
-    lv_obj_add_event_cb(objects.basic_settings_smart_position_switch, ui_event_smart_position_switch, LV_EVENT_VALUE_CHANGED,
-                        NULL);
+    lv_obj_add_event_cb(objects.basic_settings_smart_position_button, ui_event_smart_position_button, LV_EVENT_CLICKED, NULL);
 
     lv_obj_add_event_cb(objects.reboot_button, ui_event_device_reboot_button, LV_EVENT_CLICKED, NULL);
     lv_obj_add_event_cb(objects.progmode_button, ui_event_device_progmode_button, LV_EVENT_ALL, NULL);
@@ -1477,6 +1476,8 @@ void TFTView_320x240::ui_events_init(void)
     lv_obj_add_event_cb(objects.obj28__cancel_button_w, ui_event_cancel, LV_EVENT_CLICKED, 0);
     lv_obj_add_event_cb(objects.obj29__ok_button_w, ui_event_ok, LV_EVENT_CLICKED, 0);
     lv_obj_add_event_cb(objects.obj29__cancel_button_w, ui_event_cancel, LV_EVENT_CLICKED, 0);
+    lv_obj_add_event_cb(objects.obj30__ok_button_w, ui_event_ok, LV_EVENT_CLICKED, 0);
+    lv_obj_add_event_cb(objects.obj30__cancel_button_w, ui_event_cancel, LV_EVENT_CLICKED, 0);
 
     // modify channel buttons
     lv_obj_add_event_cb(objects.settings_channel0_button, ui_event_modify_channel, LV_EVENT_ALL, (void *)0);
@@ -3461,6 +3462,13 @@ static void setGpsPollLabel(uint32_t secs)
     lv_label_set_text(objects.basic_settings_gps_poll_label, buf);
 }
 
+static void setSmartPositionLabel(bool enabled)
+{
+    char buf[48];
+    lv_snprintf(buf, sizeof(buf), _("Smart Position: %s"), enabled ? _("on") : _("off"));
+    lv_label_set_text(objects.basic_settings_smart_position_label, buf);
+}
+
 void TFTView_320x240::ui_event_pos_broadcast_button(lv_event_t *e)
 {
     lv_event_code_t event_code = lv_event_get_code(e);
@@ -3491,13 +3499,17 @@ void TFTView_320x240::ui_event_gps_poll_button(lv_event_t *e)
     }
 }
 
-void TFTView_320x240::ui_event_smart_position_switch(lv_event_t *e)
+void TFTView_320x240::ui_event_smart_position_button(lv_event_t *e)
 {
-    bool enabled = lv_obj_has_state(objects.basic_settings_smart_position_switch, LV_STATE_CHECKED);
-    if (enabled != THIS->db.config.position.position_broadcast_smart_enabled) {
-        THIS->db.config.position.position_broadcast_smart_enabled = enabled;
-        THIS->controller->sendConfig(meshtastic_Config_PositionConfig{THIS->db.config.position});
-        THIS->notifyReboot(true);
+    lv_event_code_t event_code = lv_event_get_code(e);
+    if (event_code == LV_EVENT_CLICKED && THIS->activeSettings == eNone) {
+        lv_dropdown_set_selected(objects.settings_smart_position_dropdown,
+                                 THIS->db.config.position.position_broadcast_smart_enabled ? 0 : 1);
+        lv_obj_clear_flag(objects.settings_smart_position_panel, LV_OBJ_FLAG_HIDDEN);
+        lv_group_focus_obj(objects.settings_smart_position_dropdown);
+        THIS->disablePanel(objects.controller_panel);
+        THIS->disablePanel(objects.tab_page_basic_settings);
+        THIS->activeSettings = eSmartPosition;
     }
 }
 
@@ -5984,6 +5996,18 @@ void TFTView_320x240::ui_event_ok(lv_event_t *e)
             lv_group_focus_obj(objects.basic_settings_gps_poll_button);
             break;
         }
+        case eSmartPosition: {
+            bool value = lv_dropdown_get_selected(objects.settings_smart_position_dropdown) == 0;
+            if (value != THIS->db.config.position.position_broadcast_smart_enabled) {
+                THIS->db.config.position.position_broadcast_smart_enabled = value;
+                THIS->controller->sendConfig(meshtastic_Config_PositionConfig{THIS->db.config.position});
+                THIS->notifyReboot(true);
+                setSmartPositionLabel(value);
+            }
+            lv_obj_add_flag(objects.settings_smart_position_panel, LV_OBJ_FLAG_HIDDEN);
+            lv_group_focus_obj(objects.basic_settings_smart_position_button);
+            break;
+        }
         case eScreenTimeout: {
 #if defined(SEEED_MESHPAGER_X2)
             // one step of the slider is 5 s
@@ -6296,6 +6320,11 @@ void TFTView_320x240::ui_event_cancel(lv_event_t *e)
         case TFTView_320x240::eGpsPolling: {
             lv_obj_add_flag(objects.settings_gps_poll_panel, LV_OBJ_FLAG_HIDDEN);
             lv_group_focus_obj(objects.basic_settings_gps_poll_button);
+            break;
+        }
+        case TFTView_320x240::eSmartPosition: {
+            lv_obj_add_flag(objects.settings_smart_position_panel, LV_OBJ_FLAG_HIDDEN);
+            lv_group_focus_obj(objects.basic_settings_smart_position_button);
             break;
         }
         case TFTView_320x240::eScreenTimeout: {
@@ -8089,7 +8118,7 @@ void TFTView_320x240::updatePositionConfig(const meshtastic_Config_PositionConfi
     Themes::recolorButton(objects.home_location_button, cfg.gps_mode == meshtastic_Config_PositionConfig_GpsMode_ENABLED);
     setPosBroadcastLabel(cfg.position_broadcast_secs);
     setGpsPollLabel(cfg.gps_update_interval);
-    lv_obj_set_state(objects.basic_settings_smart_position_switch, LV_STATE_CHECKED, cfg.position_broadcast_smart_enabled);
+    setSmartPositionLabel(cfg.position_broadcast_smart_enabled);
 }
 
 void TFTView_320x240::updatePowerConfig(const meshtastic_Config_PowerConfig &cfg)

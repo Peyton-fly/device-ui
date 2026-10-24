@@ -1567,19 +1567,6 @@ void TDeckGUI::ui_event_HomeButton(lv_event_t * e) {
 #endif
 
 #if defined(SEEED_MESHPAGER_X2)
-// X2: the button class auto-scrolls on focus with a 200-400ms animation;
-// every animation frame re-renders the full list panel, stalling the next
-// key. Reveal the newly focused row instantly instead - same scroll target
-// as the class handler, one redraw.
-static void revealFocusedInstantly(void)
-{
-    lv_indev_t *indev = lv_indev_get_act();
-    lv_group_t *group = indev ? lv_indev_get_group(indev) : NULL;
-    lv_obj_t *focus = group ? lv_group_get_focused(group) : NULL;
-    if (focus)
-        lv_obj_scroll_to_view_recursive(focus, LV_ANIM_OFF);
-}
-
 /**
  * Screen-level key handler (bubble endpoint): raw UP/DOWN do scoped focus
  * traversal, RETURN leaves the active panel for the main buttons group
@@ -1673,9 +1660,6 @@ void TFTView_320x240::ui_event_ScreenKey(lv_event_t *e)
                     navigateScope(currentPanel->LV_OBJ_IDX(node_btn_idx), c == LV_KEY_DOWN, NULL);
                 }
 #endif
-                // the focus move just started an animated auto-scroll; jump
-                // to its final position in one redraw
-                revealFocusedInstantly();
                 lv_event_stop_processing(e);
             }
             return;

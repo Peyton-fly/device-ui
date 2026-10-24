@@ -8144,6 +8144,10 @@ void TFTView_320x240::screenSaving(bool enabled)
             ILOG_DEBUG("showing boot screen");
 #if defined(SEEED_MESHPAGER_X2)
             setInputGroup(defaultPanelGroup);
+            // blanking stripped the button's focused state and re-binding the
+            // same group does not restore it: refocus to bring the ring back
+            if (objects.bluetooth_button && !lv_obj_has_flag(objects.bluetooth_button, LV_OBJ_FLAG_HIDDEN))
+                lv_group_focus_obj(objects.bluetooth_button);
 #endif
             lv_screen_load_anim(objects.boot_screen, LV_SCR_LOAD_ANIM_NONE, 0, 0, false);
             screenLocked = false;

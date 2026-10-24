@@ -8092,8 +8092,10 @@ void TFTView_320x240::screenSaving(bool enabled)
         if (cannedPanel)
             hideCannedMessagesPanel();
         // close a channel QR preview before blanking: waking returns to the
-        // edit dialog, never to a stale overlay
-        if (!lv_obj_has_flag(objects.settings_modify_channel_qr_panel, LV_OBJ_FLAG_HIDDEN))
+        // edit dialog, never to a stale overlay; the panel only exists once
+        // init_screens() has run (it never does in programming mode)
+        if (objects.settings_modify_channel_qr_panel &&
+            !lv_obj_has_flag(objects.settings_modify_channel_qr_panel, LV_OBJ_FLAG_HIDDEN))
             lv_obj_send_event(objects.settings_modify_channel_qr_button, LV_EVENT_CLICKED, nullptr);
         // switch the keyboard indev to mainButtons now; the SCREEN_LOAD_START handler will
         // add blank_screen_button to the group and focus it once the screen starts loading
@@ -8109,7 +8111,10 @@ void TFTView_320x240::screenSaving(bool enabled)
         settingsGateUnlocked = false;
 #endif
     } else {
-        if (THIS->db.uiConfig.screen_lock) {
+        // lock_screen only exists once init_screens() has run (it never does
+        // in programming mode); without it fall through to the main/boot
+        // branches below, which are null-safe
+        if (THIS->db.uiConfig.screen_lock && objects.lock_screen) {
             ILOG_DEBUG("showing lock screen");
             lv_screen_load_anim(objects.lock_screen, LV_SCR_LOAD_ANIM_NONE, 0, 0, false);
         } else if (objects.main_screen) {
